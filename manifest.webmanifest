@@ -1,0 +1,30 @@
+{
+  "name": "機會面板",
+  "short_name": "機會面板",
+  "description": "集集與金金找到的機會，集中在這裡看",
+  "lang": "zh-Hant",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f6f4",
+  "theme_color": "#2b7a70",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
