@@ -84,7 +84,7 @@ function toBackend(r) {
   o.deadline_approx = false;
   o.expire_at = r.expires_at; o.created_at = r.found_at; o.remind_at = r.snooze_until || null;
   o.short_title = null; o.crawl_status = 'none'; o.crawl_error = null; o.has_full_text = false; o.full_text = '';
-  o.folder_status = 'none'; o.folder_path = null; o.folder_name = null; o.folder_error = null; o.notion_url = null; o.drop_reason = null; o.attachments = [];
+  o.folder_status = 'none'; o.folder_path = null; o.folder_name = null; o.folder_error = null; o.notion_url = null; o.drop_reason = null; o.attachments = []; o.links = [];
   return o;
 }
 
@@ -96,7 +96,9 @@ export function mockAdapter(modeStr) {
     const bad = '<img src=x onerror="window.__xss=1">';
     Object.assign(rows[0], { title: bad + '惡意測試卡', org: bad, why: bad, deadline_text: bad, amount_display: bad, first_step: bad,
       quick: [bad], facts: ['欄位：' + bad], warn: [bad], source_url: 'javascript:window.__xss=2', notion_url: 'javascript:window.__xss=3',
-      attachments: [{ name: bad, url: 'javascript:window.__xss=4' }] });
+      attachments: [{ name: bad, url: 'javascript:window.__xss=4' }],
+      status: 'doing', folder_status: 'done', folder_path: '/Users/x/' + bad, decided_at: new Date().toISOString(),
+      links: [{ kind: 'pay', label: bad, url: 'javascript:window.__xss=5', amount: bad }, { kind: 'pool', label: bad, path: '/a/' + bad }, { kind: 'review', label: bad, url: 'https://x.test/' + bad }] });
   }
   const listeners = new Set();
   const ping = () => listeners.forEach(f => f());
@@ -136,7 +138,7 @@ export function mockAdapter(modeStr) {
           const d = new Date(), pad = n => String(n).padStart(2, '0');
           r.folder_name = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '_' + r.title.replace(/[（）()\s]/g, '').slice(0, 8);
           setTimeout(() => { r.folder_status = 'building'; ping(); }, flags.has('folderslow') ? 4000 : 1200);
-          setTimeout(() => { r.folder_status = 'done'; r.folder_path = '（示意資料，沒有建資料夾）'; ping(); }, flags.has('folderslow') ? 12000 : 3000);
+          setTimeout(() => { r.folder_status = 'done'; r.folder_path = '（示意資料，沒有建資料夾）'; r.links = [{ kind: 'pool', label: 'Pool（官方文件、標書、成品）', path: '/Users/borry/Desktop/示意/11-16_示意案' }, { kind: 'review', label: '內審（製作過程）', path: '/Users/borry/Desktop/示意/11-16_示意案/製作2026-11-16' }, { kind: 'pay', label: '去領標付款', url: 'https://web.pcc.gov.tw/', amount: 'NT$ 200' }]; ping(); }, flags.has('folderslow') ? 12000 : 3000);
           break;
         }
         case 'dive': {

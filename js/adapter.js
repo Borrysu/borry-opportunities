@@ -87,6 +87,11 @@ export function normalize(r) {
     detailText: str(r.full_text), attachments: Array.isArray(r.attachments) ? r.attachments.filter(a => a && web(a.url)) : [],
     folderStatus: str(r.folder_status) || 'none', folderError: str(r.folder_error), folderName: str(r.folder_name), folderPath: str(r.folder_path), notionUrl: web(r.notion_url),
     dropReason: str(r.drop_reason),
+    // 檔案與付款連結：pool／review 可以是本機絕對路徑（個人案）或 https；pay、other 只收 https
+    links: (Array.isArray(r.links) ? r.links : []).map(l => l && typeof l === 'object' ? {
+      kind: ['pool', 'review', 'pay', 'other'].includes(l.kind) ? l.kind : 'other', label: str(l.label), amount: str(l.amount),
+      url: /^https:\/\//i.test(str(l.url)) ? str(l.url) : '', path: /^\//.test(str(l.path)) && !/\.\./.test(str(l.path)) ? str(l.path) : '' } : null)
+      .filter(l => l && (l.url || (l.path && (l.kind === 'pool' || l.kind === 'review')))),
   };
 }
 

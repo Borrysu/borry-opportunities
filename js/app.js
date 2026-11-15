@@ -198,12 +198,25 @@ function pcard(it) {
     '<h3 class="sb">' + softBreak(it.title) + '</h3><p class="st">' + (remTxt ? remTxt + '<br>' : '') + '<span data-cd="' + id + '" data-mode="line" data-lvl="' + lv + '">' + cdLine(it) + '</span></p>' +
     '<div class="pa"><button class="pd" data-act="del" data-id="' + id + '" type="button">刪掉</button><button class="pg" data-act="dive" data-id="' + id + '" type="button">深入了解</button><button class="pu" data-act="unstash" data-id="' + id + '" type="button">取消暫存</button></div></article>';
 }
+const LK = { pool: 'Pool', review: '內審', pay: '去領標付款', other: '連結' };
+const linkOf = (it, k) => it.links.find(l => l.kind === k);
+function payBtn(it, cls) {
+  const p = linkOf(it, 'pay'); if (!p) return '';
+  return '<a class="' + cls + '" href="' + esc(p.url) + '" target="_blank" rel="noopener noreferrer">' + esc(p.label || LK.pay) + (p.amount ? '（' + esc(p.amount) + '）' : '') + '</a>';
+}
+function filesHTML(it) {     // Pool／內審：https 就開連結，本機路徑就顯示並可複製
+  const ls = it.links.filter(l => l.kind === 'pool' || l.kind === 'review' || l.kind === 'other'); if (!ls.length) return '';
+  return '<section class="files"><h3>檔案</h3>' + ls.map((l, i) => '<div class="fl"><b>' + esc(l.label || LK[l.kind]) + '</b>' +
+    (l.url ? '<a class="btn btn-ghost" href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer">開啟</a>'
+           : '<div class="path">' + esc(l.path) + '</div><button class="btn btn-ghost" data-act="copy-link" data-id="' + esc(it.id) + '" data-i="' + it.links.indexOf(l) + '" type="button">複製位置</button>') +
+    '</div>').join('') + '<p class="dt-meta">本機路徑在手機上打不開，是給電腦用的。</p></section>';
+}
 const folderState = it => it.folderStatus === 'done' ? 'done' : it.folderStatus === 'failed' ? 'failed' : 'wait';
 function dcard(it) {
   const id = esc(it.id), fs = folderState(it);
   const st = fs === 'done' ? '工作資料夾建好了' : fs === 'failed' ? '資料夾沒建成，請找通通' : '<span class="spin"></span>' + (it.folderStatus === 'building' ? '正在建立工作資料夾' : '已排隊，等 Mac 接工作');
   return '<article class="pc' + (fs === 'done' ? ' done' : '') + '" data-id="' + id + '">' + '<div class="dt-tags" style="margin:0">' + chip(it) + demo(it) + '</div><h3 class="sb">' + softBreak(it.title) + '</h3>' +
-    '<p class="st">' + st + '</p><div class="pa"><button class="pg" data-act="open-folder" data-id="' + id + '" type="button">' + (fs === 'done' ? '看資料夾位置' : '看進度') + '</button></div></article>';
+    '<p class="st">' + st + '</p><div class="pa">' + payBtn(it, 'pp') + '<button class="pg" data-act="open-folder" data-id="' + id + '" type="button">' + (fs === 'done' ? '看資料夾位置' : '看進度') + '</button></div></article>';
 }
 const goneWhy = it => it.dropReason === 'deleted' ? '你刪掉的' : it.dropReason === 'skipped' ? '你決定不做的' : '時間到，自動收走';
 function gcard(it) {
@@ -258,7 +271,7 @@ function crawlHTML(it) {
   const id = esc(it.id);
   if (it.detailText) {
     const open = S.textOpen.has(it.id);
-    const att = it.attachments.length ? '<div class="att"><h3>附件</h3><ul>' + it.attachments.map(a => '<li><a href="' + esc(a.url) + '" target="_blank" rel="noopener noreferrer">' + esc(a.name || a.url) + '</a></li>').join('') + '</ul></div>' : '';
+    const att = it.attachments.length ? '<details class="att"><summary>附件 ' + it.attachments.length + ' 個</summary><ul>' + it.attachments.map(a => '<li><a href="' + esc(a.url) + '" target="_blank" rel="noopener noreferrer">' + esc(a.name || a.url) + '</a></li>').join('') + '</ul></details>' : '';   // 附件預設收合
     return '<section class="dt-sec dt-text"><h3>公告全文</h3><div class="txt' + (open ? ' open' : '') + '">' + para(it.detailText) + '</div>' +
       '<button class="more" data-act="toggle-text" data-id="' + id + '" type="button">' + (open ? '收合全文' : '展開全文') + '</button>' + att + '</section>';
   }
@@ -297,11 +310,13 @@ function folderHTML(it) {
   const fs = folderState(it), name = it.folderName ? '「' + esc(it.folderName) + '」' : '';
   if (fs === 'failed') return '<div class="fold"><p class="fold-t"><span class="ok-ic bad" aria-hidden="true">!</span>資料夾沒建成</p><p>' + esc(it.folderError || '原因不明') + '</p><p>請跟通通說，他會處理。這張卡已經記成「要做」，不會不見。</p></div>';
   if (fs !== 'done') return '<div class="fold"><p class="fold-t"><span class="spin"></span>' + (it.folderStatus === 'building' ? '正在建立工作資料夾' : '已排隊，等 Mac 接工作') + '</p><p>Mac 每分鐘接一次工作，通常 1 到 2 分鐘內建好，附件多會久一點。你可以先回到面板，不用等。</p></div>';
+  const pay = linkOf(it, 'pay');
+  const payBox = pay ? '<section class="paybox"><h3>領標付款</h3><p>AI 做到付款頁就停，付款那一下要你本人來。</p>' + payBtn(it, 'btn btn-primary') + '</section>' : '';
   const p = it.folderPath, real = /^\//.test(p);
   return '<div class="fold"><p class="fold-t"><span class="ok-ic" aria-hidden="true">✓</span>' + (real ? '工作資料夾建好了' : '這張是示意卡') + '</p><p>' + (real ? '「' + esc(it.title) + '」的工作都放在這個資料夾。' : '示意卡按「要做」不會真的建資料夾，其他流程跟真的一樣。') + '</p>' +
     '<div class="path">' + esc(p || it.folderName) + '</div><div class="acts">' +
     (real ? '<button class="btn btn-primary" data-act="copy-path" data-id="' + esc(it.id) + '" type="button">複製位置</button>' : '') +
-    (it.notionUrl ? '<a class="btn btn-ghost" href="' + esc(it.notionUrl) + '" target="_blank" rel="noopener noreferrer">開啟 Notion 頁面</a>' : '') + '</div></div>';
+    '</div>' + payBox + filesHTML(it) + '</div>';
 }
 function renderDrawer() {
   const dr = $('#drawer'), it = S.drawer && get(S.drawer.id), view = viewOf();
@@ -557,6 +572,7 @@ document.addEventListener('click', e => {
       case 'close-drawer': closeDrawer(); break;
       case 'close-hold': closeSheet(); break;
       case 'open-hold': openSheet(); break;
+      case 'copy-link': { const it = get(id), l = it && it.links[+act.dataset.i]; l && l.path && navigator.clipboard && navigator.clipboard.writeText(l.path).then(() => toast('已複製位置'), () => toast('這個瀏覽器不讓複製，請長按路徑自己複製')); break; }
       case 'copy-path': { const it = get(id); navigator.clipboard && it && navigator.clipboard.writeText(it.folderPath).then(() => toast('已複製位置'), () => toast('這個瀏覽器不讓複製，請長按路徑自己複製')); break; }
     }
     return;

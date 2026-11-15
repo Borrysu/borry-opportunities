@@ -328,7 +328,7 @@ p,li{text-wrap:pretty}
 /* 後端接上後新增 */
 .ok-ic.bad{background:var(--danger)}
 .dt-text .att{margin-top:10px}
-.dt-text .att h3{font-size:14px;color:var(--mut);margin-bottom:2px}
+.dt-text .att summary{font-size:14px;color:var(--mut);font-weight:700;line-height:44px;cursor:pointer}
 .dt-text .att a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-weight:700;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
 .dt-cd{white-space:nowrap}
 @media (max-width:380px){
@@ -350,3 +350,10 @@ p,li{text-wrap:pretty}
 /* 左右滑切籃子：關掉瀏覽器左右滑回上一頁，看板只交給我們處理橫向手勢 */
 html,body{overscroll-behavior-x:none}
 
+/* v8：領標付款與檔案連結 */
+.pc .pa .pp{flex:1 0 100%;display:flex;align-items:center;justify-content:center;min-height:46px;border-radius:12px;background:var(--card);border:1.5px solid var(--delc);color:var(--delc);font-weight:700;font-size:15px;text-decoration:none;text-align:center;padding:4px 10px}
+.paybox,.files{margin-top:18px;display:flex;flex-direction:column;gap:8px}
+.paybox h3,.files h3{font-size:14px;color:var(--mut)}
+.paybox p{font-size:14px;color:var(--mut);line-height:1.6}
+.files .fl{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.files .fl b{font-size:15px}
