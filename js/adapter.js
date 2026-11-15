@@ -10,6 +10,7 @@ const nick=(n)=>NICK[n]||n;
 //   await api.list()              → { items: [正規化卡片], serverTime: ms|null }（含待看、暫存、要做、剛收走）
 //   await api.get(id)             → 單張卡，含 detailText（opp_get）
 //   await api.act(id, action, o)  → 更新後的卡。action：dive｜stash｜unstash｜deleted｜skipped｜restore｜build
+//   await api.archive(q, year)    → { items, years }（封存區，opp_archive）；act 另有 close｜reopen｜purge
 //   api.subscribe(onPing, onState)→ 取消函式；onPing() 代表「有變動，請重抓」，onState(bool) 代表即時連線狀態
 //   api.setKey(k)                 存新金鑰（示範模式下按「貼上金鑰」用）
 // =====================================================================
@@ -26,7 +27,8 @@ export const CONFIG = {
   SLOW_MS: 3000,           // 超過這麼久還沒回來，就顯示「載入比較久」
   GONE_HOURS: 72,
   RPC: { list: 'opp_list', get: 'opp_get', topic: 'get_opp_realtime_topic',
-         dive: 'opp_dive', stash: 'opp_stash', unstash: 'opp_unstash', drop: 'opp_drop', restore: 'opp_restore', build: 'opp_build' },
+         dive: 'opp_dive', stash: 'opp_stash', unstash: 'opp_unstash', drop: 'opp_drop', restore: 'opp_restore', build: 'opp_build',
+         close: 'opp_close', reopen: 'opp_reopen', archive: 'opp_archive', purge: 'opp_purge' },
 };
 
 export class AdapterError extends Error {
@@ -77,7 +79,8 @@ export function normalize(r) {
   return {
     id: str(r.id), title: str(r.title), shortTitle: str(r.short_title), org: str(r.org),
     basket: BASKET[r.basket] || 'other',
-    status: r.status === 'stashed' ? 'snoozed' : (['new', 'doing', 'dropped', 'expired'].includes(r.status) ? r.status : 'new'),
+    status: r.status === 'stashed' ? 'snoozed' : (['new', 'doing', 'dropped', 'expired', 'closed'].includes(r.status) ? r.status : 'new'),
+    closeResult: ['won', 'lost', 'submitted', 'void'].includes(r.close_result) ? r.close_result : '', closedAt: ts(r.closed_at), decidedAt: ts(r.decided_at),
     amountLabel: str(r.amount_label), currency: str(r.currency), amountDisplay: str(r.amount_display),
     deadline: ts(r.deadline), deadlineText: str(r.deadline_text), deadlineApprox: !!r.deadline_approx,
     expiresAt: ts(r.expire_at), snoozeUntil: ts(r.remind_at), stashDueAt: ts(r.stash_due_at),
@@ -126,6 +129,10 @@ function liveAdapter() {
       return { items: all, serverTime: ts(d.server_time) };
     },
     async get(id) { return card(await rpc(R.get, { p_id: id })); },
+    async archive(q, year) {   // 封存區：結案與作廢的案子
+      const d = await rpc(R.archive, { p_q: q || null, p_year: year ? +year : null, p_limit: 200 });
+      return { items: (d && Array.isArray(d.items) ? d.items : []).map(normalize), years: d && Array.isArray(d.years) ? d.years : [] };
+    },
     async act(id, action, o = {}) {
       switch (action) {
         case 'dive': return card(await rpc(R.dive, { p_id: id, ...(o.force ? { p_force: true } : {}) }));
@@ -134,6 +141,9 @@ function liveAdapter() {
         case 'deleted': case 'skipped': return card(await rpc(R.drop, { p_id: id, p_reason: action }));
         case 'restore': return card(await rpc(R.restore, { p_id: id }));
         case 'build': return card(await rpc(R.build, { p_id: id }));
+        case 'close': return card(await rpc(R.close, { p_id: id, p_result: o.result }));
+        case 'reopen': return card(await rpc(R.reopen, { p_id: id }));
+        case 'purge': await rpc(R.purge, { p_id: id, p_confirm: o.confirm }); return null;
       }
       throw new AdapterError('server', '未知動作');
     },

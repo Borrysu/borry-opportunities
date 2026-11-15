@@ -29,6 +29,7 @@ const S = {
   tab: 'company', sheet: false, drawer: null,   // drawer = {id, view:'preview'|'full'}
   detail: new Map(),   // id → {st:'loading'|'fail'|'none', err, t0}
   textOpen: new Set(), fresh: new Set(),
+  arch: { open: false, q: '', year: '', items: [], years: [], busy: false, err: '', loaded: false },   // 封存區
 };
 let api, lastFocus = null, sigLast = '', depth = 0, ignorePop = false;
 const locks = new Set(), mutDone = {};
@@ -36,7 +37,7 @@ let OFF = 0;                                   // 伺服器時間與本機時間
 const tnow = () => Date.now() + OFF;
 
 const items = () => [...S.items.values()];
-const get = id => S.items.get(id);
+const get = id => S.items.get(id) || S.arch.items.find(i => i.id === id);
 
 // ---------------- 倒數（只做顯示；真正收走看資料庫的 status 與 expires_at） ----------------
 function target(it) {
@@ -211,6 +212,43 @@ function filesHTML(it) {     // Pool／內審：https 就開連結，本機路�
            : '<div class="path">' + esc(l.path) + '</div><button class="btn btn-ghost" data-act="copy-link" data-id="' + esc(it.id) + '" data-i="' + it.links.indexOf(l) + '" type="button">複製位置</button>') +
     '</div>').join('') + '<p class="dt-meta">本機路徑在手機上打不開，是給電腦用的。</p></section>';
 }
+const RES = { won: '得標／核定', lost: '未得標', submitted: '已送件結案', void: '作廢（做一半不要了）' };
+function closeBox(it) {
+  if (it.status !== 'doing') return '';
+  return '<section class="closebox"><h3>結案</h3><p>做完或不做了，就收進封存區，以後找檔案從封存區找。</p><div class="cb">' +
+    Object.keys(RES).map(k => '<button class="btn btn-ghost' + (k === 'void' ? ' del' : '') + '" data-act="close" data-r="' + k + '" data-id="' + esc(it.id) + '" type="button">' + RES[k] + '</button>').join('') + '</div></section>';
+}
+function arow(it) {
+  const id = esc(it.id), d = it.closedAt ? fmtDate(it.closedAt) : '';
+  return '<article class="pc arow" data-aid="' + id + '"><div class="dt-tags" style="margin:0">' + chip(it) + '<span class="rbadge r-' + esc(it.closeResult) + '">' + esc(RES[it.closeResult] || '已結案') + '</span></div>' +
+    '<h3 class="sb">' + softBreak(it.title) + '</h3><p class="st">' + (it.org ? esc(it.org) + '<br>' : '') + (d ? '結案：' + d : '') + (it.folderName ? '<br>資料夾：' + esc(it.folderName) : '') + '</p>' +
+    filesHTML(it) + '<div class="pa"><button data-act="reopen" data-id="' + id + '" type="button">放回進行中</button><button class="pd" data-act="purge" data-id="' + id + '" type="button">徹底刪除</button></div></article>';
+}
+function renderArchive() {
+  const a = S.arch, sh = $('#sheet');
+  const yrs = '<select id="arch-year" aria-label="年份"><option value="">全部年份</option>' + a.years.map(y => '<option value="' + y + '"' + (String(y) === String(a.year) ? ' selected' : '') + '>' + y + '</option>').join('') + '</select>';
+  let list = a.busy && !a.loaded ? '<p class="sheet-note"><span class="spin"></span>載入中</p>'
+    : a.err ? '<div class="zero"><b>封存區讀不到</b><span>' + esc(a.err) + '</span><button class="btn btn-ghost" data-act="arch-reload" type="button">再試一次</button></div>'
+    : a.items.length ? '<p class="grp">' + a.items.length + ' 筆</p>' + a.items.map(arow).join('')
+    : '<div class="zero"><b>' + (a.q || a.year ? '找不到符合的案子' : '封存區是空的') + '</b><span>進行中的案子按「結案」後會放在這裡，不會自動消失。</span></div>';
+  const had = document.activeElement && document.activeElement.id === 'arch-q';
+  sh.innerHTML = '<div class="dh"><button class="xb back" data-act="back-hold" type="button" aria-label="回待決區">‹</button><span>封存區</span><button class="xb" data-act="close-hold" type="button" aria-label="關閉">×</button></div>' +
+    '<div class="db"><div class="arch-f"><input id="arch-q" type="search" placeholder="搜案名、機關、資料夾" value="' + esc(a.q) + '" enterkeyhint="search">' + yrs + '</div>' + list +
+    '<p class="sheet-note">徹底刪除只刪面板上的資料，電腦裡的資料夾不會動。</p></div>';
+  if (had) { const q = $('#arch-q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  sh.classList.toggle('show', S.sheet);
+}
+let archT;
+async function loadArchive() {
+  const a = S.arch; a.busy = true; a.err = ''; renderSheet();
+  try { const r = await api.archive(a.q, a.year); a.items = r.items; a.years = r.years; a.loaded = true; }
+  catch (e) { a.err = reason(e); if (e instanceof AdapterError && e.kind === 'auth') S.net = 'auth'; }
+  finally { a.busy = false; if (S.sheet && a.open) renderSheet(); }
+}
+async function archAct(id, action, opt, okMsg) {
+  try { await api.act(id, action, opt); toast(okMsg); await loadArchive(); refresh(); }
+  catch (e) { toast('沒有成功：' + reason(e), { bad: true }); }
+}
 const folderState = it => it.folderStatus === 'done' ? 'done' : it.folderStatus === 'failed' ? 'failed' : 'wait';
 function dcard(it) {
   const id = esc(it.id), fs = folderState(it);
@@ -226,6 +264,7 @@ function gcard(it) {
     (past ? '' : '<div class="pa"><button data-act="restore" data-id="' + id + '" type="button">救回來</button></div>') + '</article>';
 }
 function renderSheet() {
+  if (S.arch.open) return renderArchive();
   const h = holdItems(), d = doingItems(), g = goneItems();
   $('#hpill').hidden = $('#holdbtn').hidden = S.net === 'auth';
   $('#holdbtn').innerHTML = '待決區<b>' + h.length + '</b>';
@@ -236,6 +275,7 @@ function renderSheet() {
   if (h.length) body += '<p class="grp">暫存中，' + h.length + ' 筆</p>' + h.map(pcard).join('');
   if (d.length) body += '<p class="grp">你說要做，' + d.length + ' 筆</p>' + d.map(dcard).join('');
   if (g.length) body += '<details class="gone"><summary>剛收走的，' + g.length + ' 筆，72 小時內可以救回來</summary>' + g.map(gcard).join('') + '</details>';
+  body += '<button class="btn btn-ghost arch-in" data-act="open-archive" type="button">封存區：結案與作廢的案子</button>';
   body += '<p class="sheet-note">提醒由集集傳訊息給你，網頁自己不會跳通知。</p>';
   sh.innerHTML = '<div class="dh"><span>待決區</span><button class="xb" data-act="close-hold" type="button" aria-label="關閉待決區">×</button></div><div class="db">' + body + '</div>';
   sh.querySelector('.db').scrollTop = sc;
@@ -316,7 +356,7 @@ function folderHTML(it) {
   return '<div class="fold"><p class="fold-t"><span class="ok-ic" aria-hidden="true">✓</span>' + (real ? '工作資料夾建好了' : '這張是示意卡') + '</p><p>' + (real ? '「' + esc(it.title) + '」的工作都放在這個資料夾。' : '示意卡按「要做」不會真的建資料夾，其他流程跟真的一樣。') + '</p>' +
     '<div class="path">' + esc(p || it.folderName) + '</div><div class="acts">' +
     (real ? '<button class="btn btn-primary" data-act="copy-path" data-id="' + esc(it.id) + '" type="button">複製位置</button>' : '') +
-    '</div>' + payBox + filesHTML(it) + '</div>';
+    '</div>' + payBox + filesHTML(it) + closeBox(it) + '</div>';
 }
 function renderDrawer() {
   const dr = $('#drawer'), it = S.drawer && get(S.drawer.id), view = viewOf();
@@ -372,7 +412,7 @@ function closeDrawer(silent) {
   if (!silent) restoreFocus();
 }
 function openSheet() { if (!S.sheet) lastFocus = document.activeElement; S.sheet = true; renderSheet(); syncOverlay(); $('#sheet .xb')?.focus({ preventScroll: true }); }
-function closeSheet() { S.sheet = false; $('#sheet').classList.remove('show'); syncOverlay(); restoreFocus(); }
+function closeSheet() { S.sheet = false; S.arch.open = false; $('#sheet').classList.remove('show'); syncOverlay(); restoreFocus(); }
 function restoreFocus() { if (!S.sheet && !S.drawer && lastFocus && document.contains(lastFocus)) { try { lastFocus.focus({ preventScroll: true }); } catch (e) {} } }
 
 // ---------------- toast ----------------
@@ -395,10 +435,10 @@ const reason = e => {
 };
 const short = t => t.length > 14 ? t.slice(0, 14) + '…' : t;
 const nm = it => short(it.shortTitle || it.title);
-const NEXT = { stash: 'snoozed', unstash: 'new', deleted: 'dropped', skipped: 'dropped', restore: 'new', build: 'doing' };
+const NEXT = { stash: 'snoozed', unstash: 'new', deleted: 'dropped', skipped: 'dropped', restore: 'new', build: 'doing', close: 'closed', reopen: 'doing' };
 const mergeCard = (old, res) => ({ ...res, detailText: res.detailText || (old ? old.detailText : ''), attachments: res.attachments.length ? res.attachments : (old ? old.attachments : []) });
 
-async function mutate(id, action, msg, undo) {
+async function mutate(id, action, msg, undo, opt = {}) {
   const it = get(id); if (!it || locks.has(id)) return false;
   const prev = { ...it };
   locks.add(id);
@@ -407,11 +447,12 @@ async function mutate(id, action, msg, undo) {
   if (action === 'unstash' || action === 'restore') next.snoozeUntil = null;
   if (action === 'deleted' || action === 'skipped') next.dropReason = action;
   if (action === 'build') next.folderStatus = 'queued';
+  if (action === 'close') { next.closeResult = opt.result; next.closedAt = tnow(); }
   S.items.set(id, next);
   renderAll();
   if (msg) toast(msg, { undo: undo ? () => undo(prev) : null });
   try {
-    const res = await api.act(id, action);
+    const res = await api.act(id, action, opt);
     mutDone[id] = tnow();
     if (res && S.items.has(id)) S.items.set(id, mergeCard(get(id), res));
     saveSnapshot();
@@ -572,6 +613,18 @@ document.addEventListener('click', e => {
       case 'close-drawer': closeDrawer(); break;
       case 'close-hold': closeSheet(); break;
       case 'open-hold': openSheet(); break;
+      case 'open-archive': S.arch.open = true; renderSheet(); loadArchive(); break;
+      case 'back-hold': S.arch.open = false; renderSheet(); break;
+      case 'arch-reload': loadArchive(); break;
+      case 'close': { const it = get(id), r = act.dataset.r; if (!it || !RES[r]) break;
+        if (!window.confirm('把「' + nm(it) + '」標成「' + RES[r] + '」，收進封存區？之後可以在封存區放回進行中。')) break;
+        closeDrawer(true); mutate(id, 'close', '已收進封存區：' + RES[r], null, { result: r }); break; }
+      case 'reopen': archAct(id, 'reopen', {}, '已放回進行中'); break;
+      case 'purge': { const it = get(id); if (!it) break;
+        const v = window.prompt('徹底刪除後面板和封存區都找不回來（電腦裡的資料夾不會動）。\n要刪就輸入完整案名：\n' + it.title);
+        if (v == null) break;
+        if (v.trim() !== it.title.trim() && v.trim() !== (it.shortTitle || it.title).trim()) { toast('案名不對，沒有刪', { bad: true }); break; }
+        archAct(id, 'purge', { confirm: v.trim() }, '已徹底刪除'); break; }
       case 'copy-link': { const it = get(id), l = it && it.links[+act.dataset.i]; l && l.path && navigator.clipboard && navigator.clipboard.writeText(l.path).then(() => toast('已複製位置'), () => toast('這個瀏覽器不讓複製，請長按路徑自己複製')); break; }
       case 'copy-path': { const it = get(id); navigator.clipboard && it && navigator.clipboard.writeText(it.folderPath).then(() => toast('已複製位置'), () => toast('這個瀏覽器不讓複製，請長按路徑自己複製')); break; }
     }
@@ -582,6 +635,12 @@ document.addEventListener('click', e => {
     const it = get(c.dataset.id); if (!it || c.closest('.gone')) return;
     openDrawer(c.dataset.id, it.status === 'doing' ? 'folder' : 'preview');
   }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'arch-q') { S.arch.q = e.target.value; clearTimeout(archT); archT = setTimeout(loadArchive, 350); }
+});
+document.addEventListener('change', e => {
+  if (e.target.id === 'arch-year') { S.arch.year = e.target.value; loadArchive(); }
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (S.drawer) closeDrawer(); else if (S.sheet) closeSheet(); return; }

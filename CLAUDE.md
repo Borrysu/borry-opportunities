@@ -47,3 +47,8 @@ Borry 在公司電腦「好咖皮條客面板｜監工」視窗提的修正，�
    - Mac 建好資料夾時 `opp_mac_done` 自動補 Pool＝案子資料夾、內審＝`製作YYYY-MM-DD`，都是本機絕對路徑。
    - AI 做到付款頁時呼叫 `opp_set_link(p_key, p_id, 'pay', '<https 付款頁>', '去領標付款', '<金額>')`；同一個 kind 會取代舊的，target 傳空字串就移除。pay、other 只收 https，pool、review 另收本機絕對路徑。
    - 改函式前的原始定義備份在 `~/Claude-Projects/Tools/opportunity-folder-job/backup/20261116_函式修改前.sql`，要退回就重跑那份。
+13. **結案、封存區、徹底刪除**（Borry 2026-11-16 在皮條客監工視窗提，個人版同步做）：
+   - 進行中的卡在資料夾抽屜底下「結案」選一種：得標／核定、未得標、已送件結案、作廢（做一半不要了），按之前再確認一次。資料庫 `opp_close`，狀態 `closed`、`close_result`、`closed_at`。
+   - 封存區從待決區底部進入，列出所有結案和作廢的案子，不會自動消失；可以搜案名、機關、資料夾名，可以篩年份；每列都有 Pool、內審位置。資料庫 `opp_archive`。可以「放回進行中」（`opp_reopen`）。
+   - 徹底刪除只限封存區或已收走的卡，只有 Borry 本人或管理員金鑰能刪，要輸入完整案名；只刪面板上的資料，電腦裡的資料夾不動。資料庫 `opp_purge`。
+

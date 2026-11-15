@@ -357,3 +357,20 @@ html,body{overscroll-behavior-x:none}
 .paybox p{font-size:14px;color:var(--mut);line-height:1.6}
 .files .fl{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
 .files .fl b{font-size:15px}
+/* v9：結案與封存區 */
+.closebox{margin-top:18px;display:flex;flex-direction:column;gap:8px}
+.closebox h3{font-size:14px;color:var(--mut)}
+.closebox p{font-size:14px;color:var(--mut);line-height:1.6}
+.closebox .cb{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.closebox .cb .btn{min-height:46px;font-size:14.5px;padding:4px 8px}
+.closebox .cb .del{grid-column:1/-1;color:var(--delc)}
+.arch-in{width:100%;min-height:46px;margin-top:14px}
+.arch-f{display:flex;gap:8px;margin-bottom:6px}
+.arch-f input{flex:1;min-width:0;min-height:44px;border:1.5px solid var(--line);border-radius:12px;padding:0 12px;font:inherit;font-size:16px;background:var(--card);color:var(--ink)}
+.arch-f select{min-height:44px;border:1.5px solid var(--line);border-radius:12px;padding:0 8px;font:inherit;font-size:15px;background:var(--card);color:var(--ink)}
+.arow{cursor:default}
+.arow .files{margin-top:8px}
+.rbadge{display:inline-flex;align-items:center;font-size:12.5px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--stat);color:var(--mut)}
+.rbadge.r-won{background:var(--ok-bg);color:var(--ok-ink)}
+.rbadge.r-void{color:var(--delc)}
+.dh .back{margin-right:4px;font-size:26px}

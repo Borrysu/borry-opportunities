@@ -92,6 +92,8 @@ export function mockAdapter(modeStr) {
   const flags = new Set(String(modeStr).split(',').map(s => s.trim()).filter(Boolean));
   let rows = (flags.has('empty') ? [] : build()).map(toBackend);
   if (flags.has('emptybasket')) rows = rows.filter(r => r.basket !== 'honor');
+  if (rows.length > 3 && !flags.has('xss')) Object.assign(rows[rows.length - 1], { status: 'closed', close_result: 'won', closed_at: new Date(Date.now() - 3 * D).toISOString(), decided_at: new Date(Date.now() - 20 * D).toISOString(),
+    folder_status: 'done', folder_name: '10-27_示意結案', links: [{ kind: 'pool', label: 'Pool（官方文件、標書、成品）', path: '/Users/borry/Desktop/示意/10-27_示意結案' }, { kind: 'review', label: '內審（製作過程）', path: '/Users/borry/Desktop/示意/10-27_示意結案/製作2026-10-27' }] });
   if (flags.has('xss') && rows[0]) {
     const bad = '<img src=x onerror="window.__xss=1">';
     Object.assign(rows[0], { title: bad + '惡意測試卡', org: bad, why: bad, deadline_text: bad, amount_display: bad, first_step: bad,
@@ -121,7 +123,13 @@ export function mockAdapter(modeStr) {
       await wait(150);
       if (flags.has('offline')) throw new AdapterError('network', '連不上伺服器');
       if (flags.has('auth')) throw new AdapterError('auth', '金鑰不對', 401);
-      return { items: rows.map(r => normalize(view(r))), serverTime: Date.now() };
+      return { items: rows.filter(r => r.status !== 'closed').map(r => normalize(view(r))), serverTime: Date.now() };
+    },
+    async archive(q, year) {
+      await wait(200);
+      const cl = rows.filter(r => r.status === 'closed'), yr = r => new Date(r.closed_at).getFullYear();
+      const hit = cl.filter(r => (!year || yr(r) === +year) && (!q || [r.title, r.short_title, r.org, r.folder_name].join(' ').toLowerCase().includes(String(q).toLowerCase())));
+      return { items: hit.map(r => normalize(view(r))), years: [...new Set(cl.map(yr))].sort((a, b) => b - a) };
     },
     async get(id) { await wait(200); return normalize(Object.assign(view(find(id)), { full_text: find(id).full_text })); },
     async act(id, action, o = {}) {
@@ -141,6 +149,9 @@ export function mockAdapter(modeStr) {
           setTimeout(() => { r.folder_status = 'done'; r.folder_path = '（示意資料，沒有建資料夾）'; r.links = [{ kind: 'pool', label: 'Pool（官方文件、標書、成品）', path: '/Users/borry/Desktop/示意/11-16_示意案' }, { kind: 'review', label: '內審（製作過程）', path: '/Users/borry/Desktop/示意/11-16_示意案/製作2026-11-16' }, { kind: 'pay', label: '去領標付款', url: 'https://web.pcc.gov.tw/', amount: 'NT$ 200' }]; ping(); }, flags.has('folderslow') ? 12000 : 3000);
           break;
         }
+        case 'close': if (!['doing', 'closed'].includes(r.status)) throw new AdapterError('state', 'card is ' + r.status, 400); r.status = 'closed'; r.close_result = o.result; r.closed_at = new Date().toISOString(); break;
+        case 'reopen': if (r.status !== 'closed') throw new AdapterError('state', 'card is not closed', 400); r.status = 'doing'; r.close_result = null; r.closed_at = null; break;
+        case 'purge': if (o.confirm !== r.title && o.confirm !== (r.short_title || r.title)) throw new AdapterError('state', 'confirm text does not match title', 400); rows.splice(rows.indexOf(r), 1); ping(); return null;
         case 'dive': {
           if (r.crawl_status === 'crawling' || (r.crawl_status === 'done' && !o.force)) break;
           r.crawl_status = 'crawling'; r.crawl_error = null;
