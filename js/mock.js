@@ -15,7 +15,7 @@
 //   folderslow   要做之後，資料夾 12 秒後才建好
 //   xss          第一張卡的文字欄都塞惡意 HTML、連結改成 javascript:（驗跳脫用，window.__xss 應一直是 undefined）
 //   以上資料一律轉成後端（opp_list）的欄位格式再交給 normalize，所以示範與真後端走同一條路。
-import { AdapterError, normalize, normScan, normHistory } from './adapter.js?v15';
+import { AdapterError, normalize, normScan, normHistory } from './adapter.js?v16';
 
 const H = 3600e3, D = 24 * H;
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -92,6 +92,7 @@ export function mockAdapter(modeStr) {
   const flags = new Set(String(modeStr).split(',').map(s => s.trim()).filter(Boolean));
   let rows = (flags.has('empty') ? [] : build()).map(toBackend);
   if (flags.has('emptybasket')) rows = rows.filter(r => r.basket !== 'honor');
+  if (rows[0] && !flags.has('xss')) rows[0].links = [{ kind: 'pay', label: '去領標付款', url: 'https://web.pcc.gov.tw/', amount: 'NT$ 200' }];   // 示範：還沒說要做也能領標
   if (rows.length > 3 && !flags.has('xss')) Object.assign(rows[rows.length - 1], { status: 'closed', close_result: 'won', closed_at: new Date(Date.now() - 3 * D).toISOString(), decided_at: new Date(Date.now() - 20 * D).toISOString(),
     folder_status: 'done', folder_name: '10-27_示意結案', links: [{ kind: 'pool', label: 'Pool（官方文件、標書、成品）', path: '/Users/borry/Desktop/示意/10-27_示意結案' }, { kind: 'review', label: '內審（製作過程）', path: '/Users/borry/Desktop/示意/10-27_示意結案/製作2026-10-27' }] });
   if (flags.has('xss') && rows[0]) {

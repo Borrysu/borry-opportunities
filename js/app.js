@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v15';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v15';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v16';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v16';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -228,6 +228,10 @@ function filesHTML(it) {     // Pool／內審：https 就開連結，本機路�
 async function loadHistory(id) {
   try { if (!api.history) return; const h = await api.history(id); S.hist.set(id, h); if (S.drawer && S.drawer.id === id) renderDrawer(); } catch (e) {}
 }
+function bidBox(it) {      // 還沒說要做的卡也能領標：領標是拿詳細資料，不代表要做（Borry 2026-11-16）
+  if (it.status === 'doing' || !linkOf(it, 'pay')) return '';
+  return '<section class="paybox"><h3>領標</h3><p>領標是先拿到詳細資料，不代表要做。AI 做到付款頁就停，付款那一下要你本人來。</p>' + payBtn(it, 'btn btn-primary') + '</section>';
+}
 function histHTML(it) {     // 誰、什麼時候、做了什麼
   const h = S.hist.get(it.id); if (!h || !h.length) return '';
   return '<section class="dt-sec hist"><h3>紀錄</h3><ul>' + h.map(e => '<li><time>' + esc(fmtClock(e.at)) + '</time><span><b>' + esc(e.actor) + '</b>' + esc(e.action) + '</span></li>').join('') + '</ul></section>';
@@ -325,7 +329,7 @@ function previewHTML(it) {
   return '<div class="dt">' + head(it) + statBlock(it) +
     (it.why ? '<p class="dt-why sbp">' + softBreak(it.why) + '</p>' : '') +
     (it.quick.length ? '<ul class="pv-list">' + it.quick.map(x => '<li class="sbp">' + softBreak(x) + '</li>').join('') + '</ul>' : '') +
-    warnBox(it.warn, 1) + firstBox(it) +
+    warnBox(it.warn, 1) + firstBox(it) + bidBox(it) +
     (rem ? '<p class="dt-meta">暫存中，' + (rem > tnow() ? fmtDate(rem) + ' 集集會傳訊息提醒你' : '已到提醒時間') + '</p>' : '') + metaLine(it) + '</div>';
 }
 function crawlHTML(it) {
@@ -364,7 +368,7 @@ function fullHTML(it) {
   }).join('') + '</ul></section>' : '';
   return '<div class="dt">' + head(it) + statBlock(it) +
     (it.why ? '<div><p class="dt-why sbp">' + softBreak(it.why) + '</p>' + (it.fit || it.honor ? '<p class="dt-fit">' + (it.fit ? '契合度 <b>' + esc(it.fit) + '</b>' : '') + (it.honor ? '導演地位 <b>' + esc(it.honor) + '</b>' : '') + '</p>' : '') + '</div>' : '') +
-    warnBox(it.warn) + crawlHTML(it) + firstBox(it) + facts +
+    warnBox(it.warn) + bidBox(it) + crawlHTML(it) + firstBox(it) + facts +
     '<section class="dt-sec dt-src"><h3>來源</h3>' + metaLine(it) + link(it) + '</section>' + histHTML(it) + '</div>';
 }
 function folderHTML(it) {
