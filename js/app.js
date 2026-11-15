@@ -190,7 +190,7 @@ function pcard(it) {
   const remTxt = rem ? (rem > tnow() ? '提醒時間：' + fmtDate(rem) + '，由集集傳訊息給你' : '已到提醒時間，請決定要不要做') : '';
   return '<article class="pc" data-id="' + id + '" data-lvl="' + lv + '">' + '<div class="dt-tags" style="margin:0">' + chip(it) + demo(it) + '</div>' +
     '<h3 class="sb">' + softBreak(it.title) + '</h3><p class="st">' + (remTxt ? remTxt + '<br>' : '') + '<span data-cd="' + id + '" data-mode="line" data-lvl="' + lv + '">' + cdLine(it) + '</span></p>' +
-    '<div class="pa"><button class="pd" data-act="del" data-id="' + id + '" type="button">刪掉</button><button class="pg" data-act="dive" data-id="' + id + '" type="button">深入了解</button></div></article>';
+    '<div class="pa"><button class="pd" data-act="del" data-id="' + id + '" type="button">刪掉</button><button class="pg" data-act="dive" data-id="' + id + '" type="button">深入了解</button><button class="pu" data-act="unstash" data-id="' + id + '" type="button">取消暫存</button></div></article>';
 }
 const folderState = it => it.folderStatus === 'done' ? 'done' : it.folderStatus === 'failed' ? 'failed' : 'wait';
 function dcard(it) {
@@ -256,13 +256,18 @@ function crawlHTML(it) {
       '<button class="more" data-act="toggle-text" data-id="' + id + '" type="button">' + (open ? '收合全文' : '展開全文') + '</button>' + att + '</section>';
   }
   const d = S.detail.get(it.id), st = it.crawlStatus;
+  if (d && d.timedOut && !d.busy) {
+    return '<section class="dt-crawl fail"><div><b>讀全文逾時</b><small>已經等超過 60 秒，還沒讀完。上面的條件還可以看。要全文的話，可以再讀一次' + (it.sourceUrl ? '，或開原始連結' : '') + '。</small></div><div class="acts">' +
+      '<button class="btn btn-primary" data-act="retry-detail" data-id="' + id + '" type="button">再讀一次</button>' +
+      (it.sourceUrl ? '<a class="btn btn-ghost" href="' + esc(it.sourceUrl) + '" target="_blank" rel="noopener noreferrer">開原始連結</a>' : '') + '</div></section>';
+  }
   if (st === 'failed' && !(d && d.busy)) {
     return '<section class="dt-crawl fail"><div><b>抓取失敗，開原始連結</b><small>' + esc(it.crawlError || '沒有抓到全文') + (it.sourceUrl ? '。上面的條件是集集和金金整理的，全文要自己開連結看。' : '。') + '</small></div><div class="acts">' +
       (it.sourceUrl ? '<a class="btn btn-primary" href="' + esc(it.sourceUrl) + '" target="_blank" rel="noopener noreferrer">開原始連結</a>' : '') +
-      (it.sourceUrl ? '<button class="btn btn-ghost" data-act="retry-detail" data-id="' + id + '" type="button">再抓一次</button>' : '') + '</div></section>';
+      '<button class="btn btn-ghost" data-act="retry-detail" data-id="' + id + '" type="button">再讀一次</button></div></section>';
   }
   const t0 = d && d.t0 || tnow();
-  return '<section class="dt-crawl"><div class="row"><span class="spin"></span><div><b>正在讀取公告全文</b><small>已等 <span data-elapsed="' + id + '">' + Math.floor((tnow() - t0) / 1000) + '</span> 秒，通常 2 到 10 秒。讀完會自動出現在這裡，你不用等，先看上面的條件也可以。</small></div></div></section>';
+  return '<section class="dt-crawl wait" aria-live="polite"><div class="row"><span class="spin" aria-hidden="true"></span><div><b>正在讀全文</b><small>已等 <span data-elapsed="' + id + '">' + Math.floor((tnow() - t0) / 1000) + '</span> 秒，通常 2 到 10 秒。讀完會自動出現在這裡，你也可以先看上面的條件。</small></div></div><div class="crawl-sk" aria-hidden="true"><i class="sk"></i><i class="sk"></i><i class="sk"></i></div></section>';
 }
 function fullHTML(it) {
   const facts = it.facts.length ? '<section class="dt-sec"><h3>完整條件</h3><ul class="dt-list">' + it.facts.map(f => {
@@ -271,7 +276,7 @@ function fullHTML(it) {
   }).join('') + '</ul></section>' : '';
   return '<div class="dt">' + head(it) + statBlock(it) +
     (it.why ? '<div><p class="dt-why sbp">' + softBreak(it.why) + '</p>' + (it.fit || it.honor ? '<p class="dt-fit">' + (it.fit ? '契合度 <b>' + esc(it.fit) + '</b>' : '') + (it.honor ? '導演地位 <b>' + esc(it.honor) + '</b>' : '') + '</p>' : '') + '</div>' : '') +
-    warnBox(it.warn) + facts + firstBox(it) + crawlHTML(it) +
+    warnBox(it.warn) + crawlHTML(it) + firstBox(it) + facts +
     '<section class="dt-sec dt-src"><h3>來源</h3>' + metaLine(it) + link(it) + '</section></div>';
 }
 function folderHTML(it) {
@@ -410,6 +415,11 @@ function actHold(id) {
   if (S.drawer && S.drawer.id === id) closeDrawer(true);
   leave(id, 'hold', () => mutate(id, 'stash', '「' + nm(it) + '」放進待決區，明天 ' + String(HOLD_HOUR).padStart(2, '0') + ':00 集集會傳訊息提醒你', () => mutate(id, 'unstash', '已復原')));
 }
+function actUnstash(id) {
+  const it = get(id); if (!it) return;
+  if (S.drawer && S.drawer.id === id) closeDrawer(true);
+  mutate(id, 'unstash', '「' + nm(it) + '」已取消暫存，回到待看', () => mutate(id, 'stash', '已復原'));
+}
 
 // ---------------- 深入了解：資料庫端讀全文，前端等結果 ----------------
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -427,13 +437,22 @@ async function ensureDetail(id, force) {
     else if (it.crawlStatus === 'done' || it.hasFullText) c = (await api.get(id)) || it;
     put(c); redrawDrawer(id);
     const t0 = tnow();
-    while (c.crawlStatus === 'crawling' && tnow() - t0 < 60000) { await wait(2000); c = (await api.get(id)) || c; put(c); }
+    while (c.crawlStatus === 'crawling' && tnow() - t0 < 60000) { await wait(2000); c = (await api.get(id)) || c; put(c); redrawDrawer(id); }
+    if (c.crawlStatus === 'crawling') {
+      S.detail.set(id, { busy: false, timedOut: true, t0: (S.detail.get(id) && S.detail.get(id).t0) || t0 });
+      saveSnapshot();
+      return;
+    }
     if (c.crawlStatus === 'done' && !c.detailText) { c = (await api.get(id)) || c; put(c); }
     saveSnapshot();
   } catch (e) {
     if (e instanceof AdapterError && e.kind === 'auth') S.net = 'auth';
     toast('讀全文沒有成功：' + reason(e), { bad: true });
-  } finally { S.detail.delete(id); renderAll(); }
+  } finally {
+    const d = S.detail.get(id);
+    if (!(d && d.timedOut)) S.detail.delete(id);
+    renderAll();
+  }
 }
 
 // ---------------- 讀取：快照、逾時、輪詢、即時 ----------------
@@ -492,6 +511,7 @@ document.addEventListener('click', e => {
     switch (a) {
       case 'del': actDel(id); break;
       case 'hold': actHold(id); break;
+      case 'unstash': actUnstash(id); break;
       case 'dive': openDrawer(id, 'full'); break;
       case 'no': actNo(id); break;
       case 'yes': mutate(id, 'build'); break;
