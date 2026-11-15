@@ -374,3 +374,8 @@ html,body{overscroll-behavior-x:none}
 .rbadge.r-won{background:var(--ok-bg);color:var(--ok-ink)}
 .rbadge.r-void{color:var(--delc)}
 .dh .back{margin-right:4px;font-size:26px}
+/* v11：立即掃描（留單給集集） */
+.scanl{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:6px;font-size:13px;color:var(--mut)}
+.scanl.wait{color:var(--accent);font-weight:700}
+.scanb{min-height:36px;padding:0 12px;border-radius:99px;border:1.5px solid var(--accent);color:var(--accent);background:var(--card);font-weight:700;font-size:13.5px}
+.scanb:disabled{opacity:.5}

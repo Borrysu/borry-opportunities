@@ -15,7 +15,7 @@
 //   folderslow   要做之後，資料夾 12 秒後才建好
 //   xss          第一張卡的文字欄都塞惡意 HTML、連結改成 javascript:（驗跳脫用，window.__xss 應一直是 undefined）
 //   以上資料一律轉成後端（opp_list）的欄位格式再交給 normalize，所以示範與真後端走同一條路。
-import { AdapterError, normalize } from './adapter.js?v10';
+import { AdapterError, normalize, normScan } from './adapter.js?v11';
 
 const H = 3600e3, D = 24 * H;
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -103,6 +103,7 @@ export function mockAdapter(modeStr) {
       links: [{ kind: 'pay', label: bad, url: 'javascript:window.__xss=5', amount: bad }, { kind: 'pool', label: bad, path: '/a/' + bad }, { kind: 'review', label: bad, url: 'https://x.test/' + bad }] });
   }
   const listeners = new Set();
+  const scans = {};   // 示範：立即掃描留的單（不會有人來收）
   const ping = () => listeners.forEach(f => f());
   const find = id => { const r = rows.find(x => x.id === id); if (!r) throw new AdapterError('server', '找不到這筆'); return r; };
   const view = r => { const o = Object.assign({}, r); delete o.full_text; o.has_full_text = !!r.full_text; return o; };
@@ -125,6 +126,8 @@ export function mockAdapter(modeStr) {
       if (flags.has('auth')) throw new AdapterError('auth', '金鑰不對', 401);
       return { items: rows.filter(r => r.status !== 'closed').map(r => normalize(view(r))), serverTime: Date.now() };
     },
+    async scanRequest(basket) { await wait(300); sorry(); const b = { funding: 'fund', achievement: 'honor' }[basket] || basket; scans[b] = scans[b] || { status: 'pending', requested_at: new Date().toISOString() }; setTimeout(ping, 50); return scans[b]; },
+    async scanStatus() { await wait(100); return normScan(Object.fromEntries(['company', 'personal', 'other', 'fund', 'honor'].map(b => [b, { open: scans[b] || null, last: b === 'company' ? { done_at: new Date(Date.now() - 5 * H).toISOString(), added: 2 } : null }]))); },
     async archive(q, year) {
       await wait(200);
       const cl = rows.filter(r => r.status === 'closed'), yr = r => new Date(r.closed_at).getFullYear();

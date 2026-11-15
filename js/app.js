@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v10';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v10';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v11';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v11';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -29,6 +29,7 @@ const S = {
   tab: 'company', sheet: false, drawer: null,   // drawer = {id, view:'preview'|'full'}
   detail: new Map(),   // id → {st:'loading'|'fail'|'none', err, t0}
   textOpen: new Set(), fresh: new Set(),
+  scan: {},             // 各籃立即掃描的單：{open, last}
   arch: { open: false, q: '', year: '', items: [], years: [], busy: false, err: '', loaded: false },   // 封存區
 };
 let api, lastFocus = null, sigLast = '', depth = 0, ignorePop = false;
@@ -173,13 +174,21 @@ function renderBoard() {
     const body = loadingEmpty ? skel() + skel() + skel()
       : list.length ? list.map(card).join('')
       : '<div class="zero">' + IC.inbox + '<b>這一籃目前是空的</b><span>集集和金金找到新的，會自動出現在這裡。</span></div>';
-    return '<section class="lane b-' + b.k + (S.tab === b.k ? ' cur' : '') + '" data-l="' + b.k + '"><div class="lh"><h2><i class="ld"></i>' + b.n + '' + (loadingEmpty ? '' : '<em>' + list.length + '</em>') + '</h2><p>' + b.d + '</p></div><div class="lbody">' + body + '</div></section>';
+    return '<section class="lane b-' + b.k + (S.tab === b.k ? ' cur' : '') + '" data-l="' + b.k + '"><div class="lh"><h2><i class="ld"></i>' + b.n + '' + (loadingEmpty ? '' : '<em>' + list.length + '</em>') + '</h2><p>' + b.d + '</p>' + scanLine(b.k) + '</div><div class="lbody">' + body + '</div></section>';
   }).join('');
   lanes.querySelectorAll('.lane').forEach(l => { const b = l.querySelector('.lbody'); if (keep[l.dataset.l]) b.scrollTop = keep[l.dataset.l]; });
   lanes.scrollLeft = left;
   S.fresh.clear();
   edgeFade();
 }
+function scanLine(k) {   // 每籃的「立即掃描」：留單給集集，它下次醒來先掃
+  if (!api || S.net === 'auth') return '';
+  const s = S.scan[k] || {}, o = s.open, l = s.last;
+  if (o) return '<p class="scanl wait">' + (o.status === 'taken' ? '集集正在掃描' : '已留單，集集下次醒來會先掃（' + fmtClock(o.at) + ' 留單）') + '</p>';
+  return '<p class="scanl"><button class="scanb" data-act="scan" data-b="' + k + '" type="button">立即掃描新機會</button>' +
+    (l ? '<span>上次 ' + fmtClock(l.at) + '，新增 ' + l.added + ' 張</span>' : '') + '</p>';
+}
+async function loadScan() { try { if (!api.scanStatus) return; const n = await api.scanStatus(); if (JSON.stringify(n) !== JSON.stringify(S.scan)) { S.scan = n; renderBoard(); } } catch (e) {} }
 function edgeFade() {
   const l = $('#lanes'), b = $('#board'); if (!l) return;
   b.classList.toggle('sl', l.scrollLeft > 8);
@@ -555,7 +564,7 @@ async function refresh() {
     locks.forEach(id => { if (!next.has(id) && S.items.has(id)) next.set(id, S.items.get(id)); });
     S.items = next; S.net = 'ok'; S.hadData = true; S.lastOk = tnow();
     if (S.firstNet && added.length) { added.forEach(a => S.fresh.add(a.id)); toast('新進 ' + added.length + ' 筆：「' + nm(added[0]) + '」' + (added.length > 1 ? ' 等' : '')); }
-    S.firstNet = true; saveSnapshot();
+    S.firstNet = true; saveSnapshot(); loadScan();
     // 讀全文在別處完成了，而且正開著這張卡的詳細頁：把全文抓進來
     const dr = S.drawer && get(S.drawer.id);
     if (dr && viewOf() === 'full' && dr.crawlStatus === 'done' && !dr.detailText) ensureDetail(dr.id);
@@ -613,6 +622,8 @@ document.addEventListener('click', e => {
       case 'close-drawer': closeDrawer(); break;
       case 'close-hold': closeSheet(); break;
       case 'open-hold': openSheet(); break;
+      case 'scan': { const k = act.dataset.b; act.disabled = true;
+        api.scanRequest(k).then(() => { toast('已留單，集集下次醒來會先掃「' + BN[k] + '」'); loadScan(); }, e => { act.disabled = false; toast('沒有留成：' + reason(e), { bad: true }); }); break; }
       case 'open-archive': S.arch.open = true; renderSheet(); loadArchive(); break;
       case 'back-hold': S.arch.open = false; renderSheet(); break;
       case 'arch-reload': loadArchive(); break;

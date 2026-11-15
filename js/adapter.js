@@ -28,7 +28,8 @@ export const CONFIG = {
   GONE_HOURS: 72,
   RPC: { list: 'opp_list', get: 'opp_get', topic: 'get_opp_realtime_topic',
          dive: 'opp_dive', stash: 'opp_stash', unstash: 'opp_unstash', drop: 'opp_drop', restore: 'opp_restore', build: 'opp_build',
-         close: 'opp_close', reopen: 'opp_reopen', archive: 'opp_archive', purge: 'opp_purge' },
+         close: 'opp_close', reopen: 'opp_reopen', archive: 'opp_archive', purge: 'opp_purge',
+         scanRequest: 'opp_scan_request', scanStatus: 'opp_scan_status' },
 };
 
 export class AdapterError extends Error {
@@ -64,7 +65,7 @@ export async function createAdapter() {
   const mockFlag = qs.get('mock');
   const forceMock = mockFlag !== null && mockFlag !== '0';
   if (hasKey() && !forceMock && CONFIG.SUPABASE_URL.startsWith('http')) return liveAdapter();
-  const { mockAdapter } = await import('./mock.js?v10');
+  const { mockAdapter } = await import('./mock.js?v11');
   return mockAdapter(forceMock ? mockFlag : '');
 }
 
@@ -75,6 +76,17 @@ const arr = v => Array.isArray(v) ? v.map(x => String(x)).filter(Boolean) : (typ
 const str = v => (v == null ? '' : String(v));
 const web = v => { v = str(v).trim(); return /^https?:\/\//i.test(v) ? v : ''; };   // 連結只收 http(s)，擋 javascript: 等
 
+// 掃描請求單：後端籃名 → 前端籃名
+const BACK_BASKET = { company: 'company', personal: 'personal', other: 'other', funding: 'fund', achievement: 'honor' };
+export function normScan(d) {
+  const out = {}; if (!d || typeof d !== 'object') return out;
+  for (const [k, v] of Object.entries(d)) {
+    const o = v && v.open, l = v && v.last;
+    out[BASKET[k] || k] = { open: o ? { status: str(o.status), at: ts(o.requested_at), takenAt: ts(o.taken_at) } : null,
+      last: l ? { at: ts(l.done_at), added: +l.added || 0, note: str(l.note) } : null };
+  }
+  return out;
+}
 export function normalize(r) {
   return {
     id: str(r.id), title: str(r.title), shortTitle: str(r.short_title), org: str(r.org),
@@ -129,6 +141,8 @@ function liveAdapter() {
       return { items: all, serverTime: ts(d.server_time) };
     },
     async get(id) { return card(await rpc(R.get, { p_id: id })); },
+    async scanRequest(basket) { return rpc(R.scanRequest, { p_basket: BACK_BASKET[basket] || basket }); },   // 立即掃描：留單給集集
+    async scanStatus() { return normScan(await rpc(R.scanStatus, {})); },
     async archive(q, year) {   // 封存區：結案與作廢的案子
       const d = await rpc(R.archive, { p_q: q || null, p_year: year ? +year : null, p_limit: 200 });
       return { items: (d && Array.isArray(d.items) ? d.items : []).map(normalize), years: d && Array.isArray(d.years) ? d.years : [] };
