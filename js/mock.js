@@ -9,7 +9,7 @@
 //   offline      列表一律失敗（先正常開過一次，再用這個看離線，會顯示上次快照）
 //   auth         模擬金鑰錯誤
 //   crawlfail    深入了解的爬全文一律失敗
-//   crawlslow     深入了解的爬全文 8 秒後才完成（看「正在讀全文」）
+//   crawlslow    深入了解的爬全文 16 秒後才完成（看「正在讀全文」，含超過 10 秒的說明）
 //   crawlhang    爬全文一直不回來（看 60 秒逾時）
 //   setfail      刪掉、暫存、不做、要做一律失敗（看回復）
 //   folderslow   要做之後，資料夾 12 秒後才建好
@@ -139,7 +139,7 @@ export function mockAdapter(modeStr) {
             if (flags.has('crawlfail') || !r.source_url) { r.crawl_status = 'failed'; r.crawl_error = r.source_url ? '對方網站沒有回應，或擋掉了讀取' : '這張卡沒有來源網址'; }
             else { r.crawl_status = 'done'; r.full_text = '# ' + r.title + '\n來源：' + (r.source_site || '') + '\n\n' + r.facts.join('\n') + '\n\n' + (r.warn.length ? '注意事項\n' + r.warn.join('\n') + '\n\n' : '') + '（示範用全文。真後端上線後，這裡會是從公告頁讀回來的原文。）'; }
             ping();
-          }, flags.has('crawlhang') ? 24 * H : flags.has('crawlslow') ? 8000 : flags.has('crawlfail') ? 1200 : 2200);
+          }, flags.has('crawlhang') ? 24 * H : flags.has('crawlslow') ? 16000 : flags.has('crawlfail') ? 1200 : 2200);
           break;
         }
       }

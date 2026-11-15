@@ -76,7 +76,13 @@ function tick() {
     e.dataset.lvl = lvOf(it);
     const card = e.closest('.card'); if (card) card.dataset.lvl = lvOf(it);
   });
-  document.querySelectorAll('[data-elapsed]').forEach(e => { const d = S.detail.get(e.dataset.elapsed); if (d) e.textContent = Math.floor((tnow() - d.t0) / 1000); });
+  document.querySelectorAll('[data-elapsed]').forEach(e => {
+    const d = S.detail.get(e.dataset.elapsed); if (!d) return;
+    const sec = Math.floor((tnow() - d.t0) / 1000);
+    e.textContent = sec;
+    const hint = e.parentNode && e.parentNode.querySelector('[data-elapsed-hint]');
+    if (hint) hint.textContent = crawlHint(sec);
+  });
   renderSummary();
 }
 
@@ -267,7 +273,13 @@ function crawlHTML(it) {
       '<button class="btn btn-ghost" data-act="retry-detail" data-id="' + id + '" type="button">再讀一次</button></div></section>';
   }
   const t0 = d && d.t0 || tnow();
-  return '<section class="dt-crawl wait" aria-live="polite"><div class="row"><span class="spin" aria-hidden="true"></span><div><b>正在讀全文</b><small>已等 <span data-elapsed="' + id + '">' + Math.floor((tnow() - t0) / 1000) + '</span> 秒，通常 2 到 10 秒。讀完會自動出現在這裡，你也可以先看上面的條件。</small></div></div><div class="crawl-sk" aria-hidden="true"><i class="sk"></i><i class="sk"></i><i class="sk"></i></div></section>';
+  const sec = Math.floor((tnow() - t0) / 1000);
+  return '<section class="dt-crawl wait" aria-live="polite"><div class="row"><span class="spin" aria-hidden="true"></span><div><b>正在讀全文</b><small>已等 <span data-elapsed="' + id + '">' + sec + '</span> 秒，<span data-elapsed-hint="' + id + '">' + crawlHint(sec) + '</span></small></div></div><div class="crawl-sk" aria-hidden="true"><i class="sk"></i><i class="sk"></i><i class="sk"></i></div></section>';
+}
+function crawlHint(sec) {
+  return sec > 10
+    ? '比平常久，再等一下；超過 60 秒會停止。讀完會自動出現在這裡，你也可以先看上面的條件。'
+    : '通常 2 到 10 秒。讀完會自動出現在這裡，你也可以先看上面的條件。';
 }
 function fullHTML(it) {
   const facts = it.facts.length ? '<section class="dt-sec"><h3>完整條件</h3><ul class="dt-list">' + it.facts.map(f => {
