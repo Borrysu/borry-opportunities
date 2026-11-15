@@ -15,7 +15,7 @@
 ## 改版流程
 1. 在 Mac 本機 `~/Developer/borry-opportunities` 改（已經 clone 好）。先 `git pull`。
 2. 本機看效果：`python3 -m http.server 8811` 後開 `http://localhost:8811/?mock=1`（示範資料，不用金鑰，不會動到真資料）。
-3. 每次改版把 `sw.js` 裡的 `CACHE` 名稱換一個新的版本號。
+3. 每次改版把版本號整包一起換（照公司版規則，避免新舊檔混搭白頁）：`sw.js` 的 `CACHE` 名稱與 `SHELL` 清單、`index.html` 的 css／js 網址、`js/app.js`、`js/mock.js`、`js/adapter.js` 裡所有 import 的 `?vN`。`app.js` 和 `mock.js` 引用 `adapter.js` 的網址必須一模一樣，不然會載成兩份。
 4. `git add -A && git commit -m "說明這次改了什麼" && git push`。
 5. 驗收：等 1 分鐘，開網址確認改動出現，手機寬度（390px）也看一次。
 
