@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v11';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v11';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v12';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v12';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -181,12 +181,15 @@ function renderBoard() {
   S.fresh.clear();
   edgeFade();
 }
-function scanLine(k) {   // 每籃的「立即掃描」：留單給集集，它下次醒來先掃
+function scanLine(k) {   // 每籃的「立即掃描」：經資料庫叫醒集集（webhook 金鑰只在後端）
   if (!api || S.net === 'auth') return '';
-  const s = S.scan[k] || {}, o = s.open, l = s.last;
-  if (o) return '<p class="scanl wait">' + (o.status === 'taken' ? '集集正在掃描' : '已留單，集集下次醒來會先掃（' + fmtClock(o.at) + ' 留單）') + '</p>';
-  return '<p class="scanl"><button class="scanb" data-act="scan" data-b="' + k + '" type="button">立即掃描新機會</button>' +
-    (l ? '<span>上次 ' + fmtClock(l.at) + '，新增 ' + l.added + ' 張</span>' : '') + '</p>';
+  const s = S.scan[k] || {}, all = S.scan.all || {};
+  const o = [s.open, all.open].filter(Boolean).sort((a, b) => b.at - a.at)[0];
+  const l = [s.last, all.last].filter(Boolean).sort((a, b) => b.at - a.at)[0];
+  const fresh = o && tnow() - o.at < 60e3;     // 叫完 60 秒內不能再按
+  const btn = '<button class="scanb" data-act="scan" data-b="' + k + '" type="button"' + (fresh ? ' disabled' : '') + '>' + (o ? '再叫一次' : '立即掃描新機會') + '</button>';
+  if (o) return '<p class="scanl wait"><span>已叫集集掃描（' + fmtClock(o.at) + '），約 5～15 分鐘</span>' + btn + '</p>';
+  return '<p class="scanl">' + btn + (l ? '<span>上次 ' + fmtClock(l.at) + '，新增 ' + l.added + ' 張</span>' : '') + '</p>';
 }
 async function loadScan() { try { if (!api.scanStatus) return; const n = await api.scanStatus(); if (JSON.stringify(n) !== JSON.stringify(S.scan)) { S.scan = n; renderBoard(); } } catch (e) {} }
 function edgeFade() {
@@ -623,7 +626,8 @@ document.addEventListener('click', e => {
       case 'close-hold': closeSheet(); break;
       case 'open-hold': openSheet(); break;
       case 'scan': { const k = act.dataset.b; act.disabled = true;
-        api.scanRequest(k).then(() => { toast('已留單，集集下次醒來會先掃「' + BN[k] + '」'); loadScan(); }, e => { act.disabled = false; toast('沒有留成：' + reason(e), { bad: true }); }); break; }
+        api.scanRequest(k).then(r => { toast(r && r.throttled ? '剛叫過了，等一下再按' : '已叫集集掃描「' + BN[k] + '」，約 5～15 分鐘'); loadScan(); setTimeout(renderBoard, 61e3); },
+          e => { act.disabled = false; toast('沒有叫成：' + reason(e), { bad: true }); }); break; }
       case 'open-archive': S.arch.open = true; renderSheet(); loadArchive(); break;
       case 'back-hold': S.arch.open = false; renderSheet(); break;
       case 'arch-reload': loadArchive(); break;
