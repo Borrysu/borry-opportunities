@@ -15,7 +15,7 @@
 //   folderslow   要做之後，資料夾 12 秒後才建好
 //   xss          第一張卡的文字欄都塞惡意 HTML、連結改成 javascript:（驗跳脫用，window.__xss 應一直是 undefined）
 //   以上資料一律轉成後端（opp_list）的欄位格式再交給 normalize，所以示範與真後端走同一條路。
-import { AdapterError, normalize, normScan } from './adapter.js?v13';
+import { AdapterError, normalize, normScan } from './adapter.js?v14';
 
 const H = 3600e3, D = 24 * H;
 const wait = ms => new Promise(r => setTimeout(r, ms));

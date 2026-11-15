@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v13';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v13';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v14';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v14';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -200,7 +200,7 @@ function edgeFade() {
 
 // ---------------- 畫面：待決區 ----------------
 const holdItems = () => sortList(items().filter(i => i.status === 'snoozed'));
-const doingItems = () => items().filter(i => i.status === 'doing').sort((a, b) => (b.foundAt || 0) - (a.foundAt || 0));
+const doingItems = () => items().filter(i => i.status === 'doing').sort((a, b) => (a.deadline || Infinity) - (b.deadline || Infinity) || (b.decidedAt || 0) - (a.decidedAt || 0));   // 最急的在最上面（Borry 2026-11-16），沒截止日的排最後
 const goneItems = () => items().filter(i => i.status === 'dropped' || i.status === 'expired').slice(0, 50);
 
 function pcard(it) {
