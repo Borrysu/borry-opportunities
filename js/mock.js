@@ -15,7 +15,7 @@
 //   folderslow   要做之後，資料夾 12 秒後才建好
 //   xss          第一張卡的文字欄都塞惡意 HTML、連結改成 javascript:（驗跳脫用，window.__xss 應一直是 undefined）
 //   以上資料一律轉成後端（opp_list）的欄位格式再交給 normalize，所以示範與真後端走同一條路。
-import { AdapterError, normalize, normScan } from './adapter.js?v12';
+import { AdapterError, normalize, normScan } from './adapter.js?v13';
 
 const H = 3600e3, D = 24 * H;
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -154,7 +154,7 @@ export function mockAdapter(modeStr) {
         }
         case 'close': if (!['doing', 'closed'].includes(r.status)) throw new AdapterError('state', 'card is ' + r.status, 400); r.status = 'closed'; r.close_result = o.result; r.closed_at = new Date().toISOString(); break;
         case 'reopen': if (r.status !== 'closed') throw new AdapterError('state', 'card is not closed', 400); r.status = 'doing'; r.close_result = null; r.closed_at = null; break;
-        case 'purge': if (o.confirm !== r.title && o.confirm !== (r.short_title || r.title)) throw new AdapterError('state', 'confirm text does not match title', 400); rows.splice(rows.indexOf(r), 1); ping(); return null;
+        case 'purge': if (!['closed', 'dropped', 'expired', 'doing'].includes(r.status)) throw new AdapterError('state', 'cannot purge', 400); if (o.confirm !== r.title && o.confirm !== (r.short_title || r.title)) throw new AdapterError('state', 'confirm text does not match title', 400); rows.splice(rows.indexOf(r), 1); ping(); return null;
         case 'dive': {
           if (r.crawl_status === 'crawling' || (r.crawl_status === 'done' && !o.force)) break;
           r.crawl_status = 'crawling'; r.crawl_error = null;

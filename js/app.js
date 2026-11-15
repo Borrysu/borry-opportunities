@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v12';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v12';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v13';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v13';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -228,7 +228,8 @@ const RES = { won: '得標／核定', lost: '未得標', submitted: '已送件�
 function closeBox(it) {
   if (it.status !== 'doing') return '';
   return '<section class="closebox"><h3>結案</h3><p>做完或不做了，就收進封存區，以後找檔案從封存區找。</p><div class="cb">' +
-    Object.keys(RES).map(k => '<button class="btn btn-ghost' + (k === 'void' ? ' del' : '') + '" data-act="close" data-r="' + k + '" data-id="' + esc(it.id) + '" type="button">' + RES[k] + '</button>').join('') + '</div></section>';
+    Object.keys(RES).map(k => '<button class="btn btn-ghost' + (k === 'void' ? ' del' : '') + '" data-act="close" data-r="' + k + '" data-id="' + esc(it.id) + '" type="button">' + RES[k] + '</button>').join('') +
+    '<button class="btn btn-ghost del purge" data-act="purge" data-id="' + esc(it.id) + '" type="button">徹底刪除（不進封存區）</button></div></section>';
 }
 function arow(it) {
   const id = esc(it.id), d = it.closedAt ? fmtDate(it.closedAt) : '';
@@ -258,7 +259,7 @@ async function loadArchive() {
   finally { a.busy = false; if (S.sheet && a.open) renderSheet(); }
 }
 async function archAct(id, action, opt, okMsg) {
-  try { await api.act(id, action, opt); toast(okMsg); await loadArchive(); refresh(); }
+  try { await api.act(id, action, opt); toast(okMsg); if (action === 'purge') { S.items.delete(id); if (S.drawer && S.drawer.id === id) closeDrawer(true); renderAll(); } if (S.arch.open) await loadArchive(); refresh(); }
   catch (e) { toast('沒有成功：' + reason(e), { bad: true }); }
 }
 const folderState = it => it.folderStatus === 'done' ? 'done' : it.folderStatus === 'failed' ? 'failed' : 'wait';

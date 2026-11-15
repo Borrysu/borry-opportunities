@@ -379,3 +379,4 @@ html,body{overscroll-behavior-x:none}
 .scanl.wait{color:var(--accent);font-weight:700}
 .scanb{min-height:36px;padding:0 12px;border-radius:99px;border:1.5px solid var(--accent);color:var(--accent);background:var(--card);font-weight:700;font-size:13.5px}
 .scanb:disabled{opacity:.5}
+.closebox .cb .purge{grid-column:1/-1;font-size:13.5px;min-height:44px;border-style:dashed}
