@@ -208,8 +208,9 @@ function dcard(it) {
 const goneWhy = it => it.dropReason === 'deleted' ? '你刪掉的' : it.dropReason === 'skipped' ? '你決定不做的' : '時間到，自動收走';
 function gcard(it) {
   const id = esc(it.id);
-  return '<article class="pc" data-id="' + id + '"><h3 class="sb">' + softBreak(it.title) + '</h3><p class="st">' + goneWhy(it) + '</p>' +
-    '<div class="pa"><button data-act="restore" data-id="' + id + '" type="button">救回來</button></div></article>';
+  const past = it.deadline && it.deadline <= tnow();
+  return '<article class="pc" data-id="' + id + '"><h3 class="sb">' + softBreak(it.title) + '</h3><p class="st">' + goneWhy(it) + (past ? '<br>截止已過，救不回來' : '') + '</p>' +
+    (past ? '' : '<div class="pa"><button data-act="restore" data-id="' + id + '" type="button">救回來</button></div>') + '</article>';
 }
 function renderSheet() {
   const h = holdItems(), d = doingItems(), g = goneItems();
@@ -236,7 +237,7 @@ function viewOf() {
 function statBlock(it) {
   const t = target(it), lv = lvOf(it);
   const lab = t.kind === 'dl' ? '距離截止' : t.kind === 'ttl' ? '沒處理就收走' : '截止日';
-  const dtx = it.deadlineText || (it.deadline ? fmtDate(it.deadline) : '');
+  const dtx = esc(it.deadlineText || (it.deadline ? fmtDate(it.deadline) : ''));
   const small = t.kind === 'dl' ? dtx : t.kind === 'ttl' ? (it.deadline ? '截止 ' + dtx : (dtx || '預計 ' + fmtDate(it.expiresAt) + ' 收走')) : '來源沒寫';
   return '<div class="dt-stats"><div class="dt-stat">' + amt(it) + '</div><div class="dt-stat"><em>' + lab + '</em><span class="dt-cd" data-cd="' + esc(it.id) + '" data-lvl="' + lv + '">' + cdFull(it) + '</span><small>' + small + '</small></div></div>';
 }
@@ -268,8 +269,9 @@ function crawlHTML(it) {
       (it.sourceUrl ? '<a class="btn btn-ghost" href="' + esc(it.sourceUrl) + '" target="_blank" rel="noopener noreferrer">開原始連結</a>' : '') + '</div></section>';
   }
   if (st === 'failed' && !(d && d.busy)) {
-    return '<section class="dt-crawl fail"><div><b>抓取失敗，開原始連結</b><small>' + esc(it.crawlError || '沒有抓到全文') + (it.sourceUrl ? '。上面的條件是集集和金金整理的，全文要自己開連結看。' : '。') + '</small></div><div class="acts">' +
-      (it.sourceUrl ? '<a class="btn btn-primary" href="' + esc(it.sourceUrl) + '" target="_blank" rel="noopener noreferrer">開原始連結</a>' : '') +
+    if (!it.sourceUrl) return '<section class="dt-crawl fail"><div><b>沒有全文</b><small>這張卡沒有來源網址，讀不到全文。上面的條件是集集和金金整理的。</small></div></section>';
+    return '<section class="dt-crawl fail"><div><b>抓取失敗，開原始連結</b><small>' + esc(it.crawlError || '沒有抓到全文') + '。上面的條件是集集和金金整理的，全文要自己開連結看。</small></div><div class="acts">' +
+      '<a class="btn btn-primary" href="' + esc(it.sourceUrl) + '" target="_blank" rel="noopener noreferrer">開原始連結</a>' +
       '<button class="btn btn-ghost" data-act="retry-detail" data-id="' + id + '" type="button">再讀一次</button></div></section>';
   }
   const t0 = d && d.t0 || tnow();
@@ -479,9 +481,9 @@ function saveSnapshot() {
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new AdapterError('timeout', '連線逾時')), ms))]);
 const sig = () => JSON.stringify(items().map(i => [i.id, i.status, i.snoozeUntil, i.deadline, i.expiresAt, i.title, i.folderStatus, i.folderPath, i.crawlStatus, i.crawlError, i.detailText.length, i.amountDisplay, i.why]));
 
-let inflight = false, pollT, pingT;
+let inflight = false, again = false, pollT, pingT, unsub = () => {};
 async function refresh() {
-  if (inflight) return; inflight = true;
+  if (inflight) { again = true; return; } inflight = true; again = false;
   const t0 = tnow(), before = sig(), prevNet = S.net, hadSlow = S.slow;
   const slowT = setTimeout(() => { S.slow = true; renderNotice(); renderLive(); }, CONFIG.SLOW_MS);
   try {
@@ -506,10 +508,12 @@ async function refresh() {
   } finally {
     clearTimeout(slowT); S.slow = false; inflight = false;
     if (sig() !== before || S.net !== prevNet || hadSlow) renderAll(); else { renderLive(); renderNotice(); }
+    if (S.net === 'auth') { clearTimeout(pollT); unsub(); unsub = () => {}; }   // 金鑰失效就停輪詢與即時連線
+    else if (again) { again = false; refresh(); }                          // 抓取中又收到變動通知：補抓一次
   }
 }
 const needFast = () => items().some(i => i.crawlStatus === 'crawling' || (i.status === 'doing' && folderState(i) === 'wait'));
-function schedulePoll() { clearTimeout(pollT); pollT = setTimeout(async () => { if (!document.hidden) await refresh(); schedulePoll(); }, needFast() ? CONFIG.FAST_POLL_MS : CONFIG.POLL_MS); }
+function schedulePoll() { clearTimeout(pollT); if (S.net === 'auth') return; pollT = setTimeout(async () => { if (!document.hidden) await refresh(); schedulePoll(); }, needFast() ? CONFIG.FAST_POLL_MS : CONFIG.POLL_MS); }
 function kickPoll() { schedulePoll(); }
 const ping = () => { clearTimeout(pingT); pingT = setTimeout(refresh, 150); };
 
@@ -582,7 +586,7 @@ window.addEventListener('popstate', () => {
 $('#lanes').addEventListener('scroll', edgeFade, { passive: true });
 window.addEventListener('resize', edgeFade);
 window.addEventListener('online', () => refresh());
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.net !== 'auth') refresh(); });
 
 // ---------------- 啟動 ----------------
 function pasteKey() {
@@ -594,7 +598,7 @@ function pasteKey() {
   api = await createAdapter();
   loadSnapshot();                        // 先用快照立刻畫出來，不等網路
   S.net = 'loading'; renderAll();
-  api.subscribe(ping, on => { S.rt = on; renderLive(); });
+  unsub = api.subscribe(ping, on => { S.rt = on; renderLive(); });
   await refresh();
   schedulePoll();
   setInterval(tick, 30000);

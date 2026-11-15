@@ -71,6 +71,7 @@ const BASKET = { company: 'company', personal: 'personal', other: 'other', fund:
 const ts = v => { if (!v) return null; const n = typeof v === 'number' ? v : Date.parse(v); return Number.isFinite(n) ? n : null; };
 const arr = v => Array.isArray(v) ? v.map(x => String(x)).filter(Boolean) : (typeof v === 'string' && v ? [v] : []);
 const str = v => (v == null ? '' : String(v));
+const web = v => { v = str(v).trim(); return /^https?:\/\//i.test(v) ? v : ''; };   // 連結只收 http(s)，擋 javascript: 等
 
 export function normalize(r) {
   return {
@@ -80,11 +81,11 @@ export function normalize(r) {
     amountLabel: str(r.amount_label), currency: str(r.currency), amountDisplay: str(r.amount_display),
     deadline: ts(r.deadline), deadlineText: str(r.deadline_text), deadlineApprox: !!r.deadline_approx,
     expiresAt: ts(r.expire_at), snoozeUntil: ts(r.remind_at), stashDueAt: ts(r.stash_due_at),
-    sourceUrl: str(r.source_url), sourceSite: str(r.source_site), foundBy: nick(str(r.found_by)), foundAt: ts(r.created_at), isDemo: !!r.is_demo,
+    sourceUrl: web(r.source_url), sourceSite: str(r.source_site), foundBy: nick(str(r.found_by)), foundAt: ts(r.created_at), isDemo: !!r.is_demo,
     why: str(r.why), quick: arr(r.quick), facts: arr(r.facts), warn: arr(r.warn), firstStep: str(r.first_step), fit: str(r.fit), honor: str(r.honor),
     crawlStatus: str(r.crawl_status) || 'none', crawlError: str(r.crawl_error), hasFullText: !!r.has_full_text,
-    detailText: str(r.full_text), attachments: Array.isArray(r.attachments) ? r.attachments.filter(a => a && a.url) : [],
-    folderStatus: str(r.folder_status) || 'none', folderError: str(r.folder_error), folderName: str(r.folder_name), folderPath: str(r.folder_path), notionUrl: str(r.notion_url),
+    detailText: str(r.full_text), attachments: Array.isArray(r.attachments) ? r.attachments.filter(a => a && web(a.url)) : [],
+    folderStatus: str(r.folder_status) || 'none', folderError: str(r.folder_error), folderName: str(r.folder_name), folderPath: str(r.folder_path), notionUrl: web(r.notion_url),
     dropReason: str(r.drop_reason),
   };
 }
@@ -104,7 +105,7 @@ function liveAdapter() {
     try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = txt; }
     if (!res.ok) {
       const msg = String((data && (data.message || data.error || data.hint)) || ('HTTP ' + res.status));
-      if (res.status === 401 || res.status === 403) { LS.del(CONFIG.KEY_STORAGE); KEY = ''; throw new AdapterError('auth', msg, res.status); }
+      if (res.status === 401 || res.status === 403) { LS.del(CONFIG.SNAPSHOT_KEY + ':' + keyTag()); LS.del(CONFIG.KEY_STORAGE); KEY = ''; throw new AdapterError('auth', msg, res.status); }
       throw new AdapterError(res.status === 400 || res.status === 422 ? 'state' : 'server', msg, res.status);
     }
     return data;

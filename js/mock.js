@@ -13,6 +13,7 @@
 //   crawlhang    爬全文一直不回來（看 60 秒逾時）
 //   setfail      刪掉、暫存、不做、要做一律失敗（看回復）
 //   folderslow   要做之後，資料夾 12 秒後才建好
+//   xss          第一張卡的文字欄都塞惡意 HTML、連結改成 javascript:（驗跳脫用，window.__xss 應一直是 undefined）
 //   以上資料一律轉成後端（opp_list）的欄位格式再交給 normalize，所以示範與真後端走同一條路。
 import { AdapterError, normalize } from './adapter.js';
 
@@ -91,6 +92,12 @@ export function mockAdapter(modeStr) {
   const flags = new Set(String(modeStr).split(',').map(s => s.trim()).filter(Boolean));
   let rows = (flags.has('empty') ? [] : build()).map(toBackend);
   if (flags.has('emptybasket')) rows = rows.filter(r => r.basket !== 'honor');
+  if (flags.has('xss') && rows[0]) {
+    const bad = '<img src=x onerror="window.__xss=1">';
+    Object.assign(rows[0], { title: bad + '惡意測試卡', org: bad, why: bad, deadline_text: bad, amount_display: bad, first_step: bad,
+      quick: [bad], facts: ['欄位：' + bad], warn: [bad], source_url: 'javascript:window.__xss=2', notion_url: 'javascript:window.__xss=3',
+      attachments: [{ name: bad, url: 'javascript:window.__xss=4' }] });
+  }
   const listeners = new Set();
   const ping = () => listeners.forEach(f => f());
   const find = id => { const r = rows.find(x => x.id === id); if (!r) throw new AdapterError('server', '找不到這筆'); return r; };
