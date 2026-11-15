@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v14';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v14';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v15';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v15';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -30,6 +30,7 @@ const S = {
   detail: new Map(),   // id → {st:'loading'|'fail'|'none', err, t0}
   textOpen: new Set(), fresh: new Set(),
   scan: {},             // 各籃立即掃描的單：{open, last}
+  hist: new Map(),      // 卡片動作紀錄：id → [{at, actor, action}]
   arch: { open: false, q: '', year: '', items: [], years: [], busy: false, err: '', loaded: false },   // 封存區
 };
 let api, lastFocus = null, sigLast = '', depth = 0, ignorePop = false;
@@ -224,6 +225,13 @@ function filesHTML(it) {     // Pool／內審：https 就開連結，本機路�
            : '<div class="path">' + esc(l.path) + '</div><button class="btn btn-ghost" data-act="copy-link" data-id="' + esc(it.id) + '" data-i="' + it.links.indexOf(l) + '" type="button">複製位置</button>') +
     '</div>').join('') + '<p class="dt-meta">本機路徑在手機上打不開，是給電腦用的。</p></section>';
 }
+async function loadHistory(id) {
+  try { if (!api.history) return; const h = await api.history(id); S.hist.set(id, h); if (S.drawer && S.drawer.id === id) renderDrawer(); } catch (e) {}
+}
+function histHTML(it) {     // 誰、什麼時候、做了什麼
+  const h = S.hist.get(it.id); if (!h || !h.length) return '';
+  return '<section class="dt-sec hist"><h3>紀錄</h3><ul>' + h.map(e => '<li><time>' + esc(fmtClock(e.at)) + '</time><span><b>' + esc(e.actor) + '</b>' + esc(e.action) + '</span></li>').join('') + '</ul></section>';
+}
 const RES = { won: '得標／核定', lost: '未得標', submitted: '已送件結案', void: '作廢（做一半不要了）' };
 function closeBox(it) {
   if (it.status !== 'doing') return '';
@@ -357,7 +365,7 @@ function fullHTML(it) {
   return '<div class="dt">' + head(it) + statBlock(it) +
     (it.why ? '<div><p class="dt-why sbp">' + softBreak(it.why) + '</p>' + (it.fit || it.honor ? '<p class="dt-fit">' + (it.fit ? '契合度 <b>' + esc(it.fit) + '</b>' : '') + (it.honor ? '導演地位 <b>' + esc(it.honor) + '</b>' : '') + '</p>' : '') + '</div>' : '') +
     warnBox(it.warn) + crawlHTML(it) + firstBox(it) + facts +
-    '<section class="dt-sec dt-src"><h3>來源</h3>' + metaLine(it) + link(it) + '</section></div>';
+    '<section class="dt-sec dt-src"><h3>來源</h3>' + metaLine(it) + link(it) + '</section>' + histHTML(it) + '</div>';
 }
 function folderHTML(it) {
   const fs = folderState(it), name = it.folderName ? '「' + esc(it.folderName) + '」' : '';
@@ -369,7 +377,7 @@ function folderHTML(it) {
   return '<div class="fold"><p class="fold-t"><span class="ok-ic" aria-hidden="true">✓</span>' + (real ? '工作資料夾建好了' : '這張是示意卡') + '</p><p>' + (real ? '「' + esc(it.title) + '」的工作都放在這個資料夾。' : '示意卡按「要做」不會真的建資料夾，其他流程跟真的一樣。') + '</p>' +
     '<div class="path">' + esc(p || it.folderName) + '</div><div class="acts">' +
     (real ? '<button class="btn btn-primary" data-act="copy-path" data-id="' + esc(it.id) + '" type="button">複製位置</button>' : '') +
-    '</div>' + payBox + filesHTML(it) + closeBox(it) + '</div>';
+    '</div>' + payBox + filesHTML(it) + histHTML(it) + closeBox(it) + '</div>';
 }
 function renderDrawer() {
   const dr = $('#drawer'), it = S.drawer && get(S.drawer.id), view = viewOf();
@@ -417,6 +425,7 @@ function openDrawer(id, view) {
   if (!S.drawer) lastFocus = document.activeElement;
   S.drawer = { id, view: view || 'preview' };
   if (view === 'full') ensureDetail(id);
+  if (view === 'full' || view === 'folder') loadHistory(id);
   renderDrawer(); syncOverlay();
   const dr = $('#drawer'); if (!dr.contains(document.activeElement)) dr.querySelector('.xb')?.focus({ preventScroll: true });
 }
@@ -468,6 +477,7 @@ async function mutate(id, action, msg, undo, opt = {}) {
     const res = await api.act(id, action, opt);
     mutDone[id] = tnow();
     if (res && S.items.has(id)) S.items.set(id, mergeCard(get(id), res));
+    if (S.hist.has(id)) loadHistory(id);
     saveSnapshot();
     return true;
   } catch (e) {

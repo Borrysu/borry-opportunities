@@ -1,4 +1,4 @@
-const NICK={'Gig Gig':'集集','Kim Kim':'金金','Tom Tom':'通通','PixPix':'皮皮'};
+const NICK={'Gig Gig':'集集','Kim Kim':'金金','Tom Tom':'通通','Tongtong':'通通','PixPix':'皮皮','Borry':'你','Mac':'Mac 建資料夾程式','系統':'系統'};
 const nick=(n)=>NICK[n]||n;
 // =====================================================================
 // 資料轉接層：整個前端只有這個檔案知道後端長什麼樣（規格見 ../BACKEND.md）。
@@ -65,7 +65,7 @@ export async function createAdapter() {
   const mockFlag = qs.get('mock');
   const forceMock = mockFlag !== null && mockFlag !== '0';
   if (hasKey() && !forceMock && CONFIG.SUPABASE_URL.startsWith('http')) return liveAdapter();
-  const { mockAdapter } = await import('./mock.js?v14');
+  const { mockAdapter } = await import('./mock.js?v15');
   return mockAdapter(forceMock ? mockFlag : '');
 }
 
@@ -76,6 +76,7 @@ const arr = v => Array.isArray(v) ? v.map(x => String(x)).filter(Boolean) : (typ
 const str = v => (v == null ? '' : String(v));
 const web = v => { v = str(v).trim(); return /^https?:\/\//i.test(v) ? v : ''; };   // 連結只收 http(s)，擋 javascript: 等
 
+export const normHistory = h => (Array.isArray(h) ? h : []).map(e => ({ at: ts(e && e.at), actor: nick(str(e && e.actor)), action: str(e && e.action) })).filter(e => e.at && e.action);
 // 掃描請求單：後端籃名 → 前端籃名
 const BACK_BASKET = { company: 'company', personal: 'personal', other: 'other', funding: 'fund', achievement: 'honor' };
 export function normScan(d) {
@@ -141,6 +142,10 @@ function liveAdapter() {
       return { items: all, serverTime: ts(d.server_time) };
     },
     async get(id) { return card(await rpc(R.get, { p_id: id })); },
+    async history(id) {   // 卡片動作紀錄：誰、什麼時候、做了什麼（opp_get 的 history）
+      const d = await rpc(R.get, { p_id: id }); const r = Array.isArray(d) ? d[0] : d;
+      return normHistory(r && r.history);
+    },
     async scanRequest(basket) { return rpc(R.scanRequest, { p_basket: BACK_BASKET[basket] || basket }); },   // 立即掃描：留單給集集
     async scanStatus() { return normScan(await rpc(R.scanStatus, {})); },
     async archive(q, year) {   // 封存區：結案與作廢的案子

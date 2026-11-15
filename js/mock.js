@@ -15,7 +15,7 @@
 //   folderslow   要做之後，資料夾 12 秒後才建好
 //   xss          第一張卡的文字欄都塞惡意 HTML、連結改成 javascript:（驗跳脫用，window.__xss 應一直是 undefined）
 //   以上資料一律轉成後端（opp_list）的欄位格式再交給 normalize，所以示範與真後端走同一條路。
-import { AdapterError, normalize, normScan } from './adapter.js?v14';
+import { AdapterError, normalize, normScan, normHistory } from './adapter.js?v15';
 
 const H = 3600e3, D = 24 * H;
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -128,6 +128,7 @@ export function mockAdapter(modeStr) {
     },
     async scanRequest(basket) { await wait(300); sorry(); const b = { funding: 'fund', achievement: 'honor' }[basket] || basket; if (scans[b] && Date.now() - Date.parse(scans[b].requested_at) < 60e3) return { ok: true, throttled: true }; scans[b] = { status: 'sent', requested_at: new Date().toISOString() }; setTimeout(ping, 50); return { ok: true }; },
     async scanStatus() { await wait(100); return normScan(Object.fromEntries(['company', 'personal', 'other', 'fund', 'honor'].map(b => [b, { open: scans[b] || null, last: b === 'company' ? { done_at: new Date(Date.now() - 5 * H).toISOString(), added: 2 } : null }]))); },
+    async history(id) { await wait(150); const r = find(id); return normHistory([{ at: r.created_at || new Date().toISOString(), actor: r.found_by || 'Gig Gig', action: '找到這個機會' }].concat(r.status === 'doing' || r.status === 'closed' ? [{ at: new Date().toISOString(), actor: 'Borry', action: '要做' }] : []).reverse()); },
     async archive(q, year) {
       await wait(200);
       const cl = rows.filter(r => r.status === 'closed'), yr = r => new Date(r.closed_at).getFullYear();
