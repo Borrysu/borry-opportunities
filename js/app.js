@@ -1,4 +1,4 @@
-// 機會面板主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
+// 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
 import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js';
 import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js';
 
@@ -514,6 +514,23 @@ function kickPoll() { schedulePoll(); }
 const ping = () => { clearTimeout(pingT); pingT = setTimeout(refresh, 150); };
 
 // ---------------- 事件 ----------------
+// 手機：在看板上左右滑動切到相鄰的籃子（橫向位移夠大且明顯比直向大才算）
+let swX = null, swY = 0, swT = 0;
+const board = document.getElementById('board');
+board.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1 || window.innerWidth >= 960 || S.sheet || S.drawer) { swX = null; return; }
+  swX = e.touches[0].clientX; swY = e.touches[0].clientY; swT = Date.now();
+}, { passive: true });
+board.addEventListener('touchend', e => {
+  if (swX === null) return;
+  const t = e.changedTouches[0], dx = t.clientX - swX, dy = t.clientY - swY; swX = null;
+  if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || Date.now() - swT > 800) return;
+  const i = BASKETS.findIndex(b => b.k === S.tab), j = i + (dx < 0 ? 1 : -1);
+  if (i < 0 || j < 0 || j >= BASKETS.length) return;
+  S.tab = BASKETS[j].k; renderBoard();
+  const cur = document.querySelector('.lane.cur'); if (cur) { cur.classList.add(dx < 0 ? 'sw-l' : 'sw-r'); cur.addEventListener('animationend', () => cur.classList.remove('sw-l', 'sw-r'), { once: true }); }
+}, { passive: true });
+
 document.addEventListener('click', e => {
   const act = e.target.closest('[data-act]'), a = act && act.dataset.act, id = act && act.dataset.id;
   if (e.target.id === 'scrim') { S.drawer ? closeDrawer() : closeSheet(); return; }

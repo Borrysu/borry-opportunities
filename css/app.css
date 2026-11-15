@@ -1,4 +1,4 @@
-/* 機會面板：p1 霧青。B 五欄看板骨架加 C 的色票與卡片形狀。 */
+/* 機會雷達：p1 霧青。B 五欄看板骨架加 C 的色票與卡片形狀。 */
 :root{
   /* 字型：系統字型優先，網路字型載入後只是補強（font-display 在字型 CSS 網址裡設為 swap） */
   --ff:'PingFang TC','Noto Sans TC','Noto Sans CJK TC','Microsoft JhengHei','Heiti TC',system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -293,10 +293,15 @@ p,li{text-wrap:pretty}
 
 /* 直向手機：看板底部留出膠囊高度，捲動區不會讓按鈕躲到膠囊下面 */
 @media (max-width:959px){
-  .board{padding-bottom:calc(env(safe-area-inset-bottom) + 80px)}
-  .lbody{padding-bottom:20px}
-  .board-msg{padding-bottom:28px}
+  /* 籃子一路鋪到螢幕底，待決區只剩右下浮動按鈕，底下不再切出一條 */
+  .board{padding-bottom:0}
+  .lane{border-radius:20px 20px 0 0}
+  .lbody{padding-bottom:calc(env(safe-area-inset-bottom) + 84px)}
+  .board-msg{padding-bottom:calc(env(safe-area-inset-bottom) + 84px);margin-bottom:0;border-radius:20px 20px 0 0}
+  .lane.sw-l{animation:swl .22s ease-out}.lane.sw-r{animation:swr .22s ease-out}
 }
+@keyframes swl{from{transform:translateX(36px);opacity:.4}to{transform:none;opacity:1}}
+@keyframes swr{from{transform:translateX(-36px);opacity:.4}to{transform:none;opacity:1}}
 
 /* 矮視窗（手機橫向）：待決區改放頂列，避免右下膠囊蓋住「深入了解」 */
 @media (max-width:959px) and (max-height:520px){
@@ -341,3 +346,7 @@ p,li{text-wrap:pretty}
   .card{padding-left:10px;padding-right:8px}
   .demo-badge{font-size:11px;height:22px;padding:0 6px}
 }
+
+/* 左右滑切籃子：關掉瀏覽器左右滑回上一頁，看板只交給我們處理橫向手勢 */
+html,body{overscroll-behavior-x:none}
+

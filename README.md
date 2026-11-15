@@ -1,4 +1,4 @@
-# 機會面板前端
+# 機會雷達前端
 
 靜態網頁，沒有建置步驟。`index.html` 加 `css/app.css` 加 `js/*.js`（ES modules，不擋畫面）。
 
