@@ -10,7 +10,7 @@ const nick=(n)=>NICK[n]||n;
 //   await api.list()              → { items: [正規化卡片], serverTime: ms|null }（含待看、暫存、要做、剛收走）
 //   await api.get(id)             → 單張卡，含 detailText（opp_get）
 //   await api.act(id, action, o)  → 更新後的卡。action：dive｜stash｜unstash｜deleted｜skipped｜restore｜build
-//   await api.archive(q, year)    → { items, years }（封存區，opp_archive）；act 另有 close｜reopen｜purge
+//   await api.archive(q, year)    → { items, years }（封存區，opp_archive）；act 另有 close｜reopen｜purge｜deliver｜paid｜back｜work
 //   api.subscribe(onPing, onState)→ 取消函式；onPing() 代表「有變動，請重抓」，onState(bool) 代表即時連線狀態
 //   api.setKey(k)                 存新金鑰（示範模式下按「貼上金鑰」用）
 // =====================================================================
@@ -29,7 +29,8 @@ export const CONFIG = {
   RPC: { list: 'opp_list', get: 'opp_get', topic: 'get_opp_realtime_topic',
          dive: 'opp_dive', stash: 'opp_stash', unstash: 'opp_unstash', drop: 'opp_drop', restore: 'opp_restore', build: 'opp_build',
          close: 'opp_close', reopen: 'opp_reopen', archive: 'opp_archive', purge: 'opp_purge',
-         scanRequest: 'opp_scan_request', scanStatus: 'opp_scan_status' },
+         scanRequest: 'opp_scan_request', scanStatus: 'opp_scan_status',
+         workUpdate: 'opp_work_update', setStatus: 'opp_set_status' },   // 案務：報價收款欄位、doing→delivered→paid（Borry 與集集的金鑰可用）
 };
 
 export class AdapterError extends Error {
@@ -65,7 +66,7 @@ export async function createAdapter() {
   const mockFlag = qs.get('mock');
   const forceMock = mockFlag !== null && mockFlag !== '0';
   if (hasKey() && !forceMock && CONFIG.SUPABASE_URL.startsWith('http')) return liveAdapter();
-  const { mockAdapter } = await import('./mock.js?v16');
+  const { mockAdapter } = await import('./mock.js?v17');
   return mockAdapter(forceMock ? mockFlag : '');
 }
 
@@ -88,11 +89,26 @@ export function normScan(d) {
   }
   return out;
 }
+const num = v => { if (v == null || v === '') return null; const n = +v; return Number.isFinite(n) ? n : null; };
+const day = v => { v = str(v); return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : ''; };
+const CAREER_TXT = ['line', 'public_identity', 'status_gain', 'status_gain_note', 'rights', 'kim_judgment', 'referrer'], CAREER_NUM = ['est_hours', 'actual_hours', 'advance_amount'], CAREER_BOOL = ['conflicts_haoka', 'tax_withheld'];
+export function normCareer(c) {
+  const o = {}; if (!c || typeof c !== 'object' || Array.isArray(c)) return o;
+  CAREER_TXT.forEach(k => { if (c[k] != null && typeof c[k] === 'string' && c[k]) o[k] = c[k]; });
+  CAREER_NUM.forEach(k => { const n = num(c[k]); if (n != null && typeof c[k] !== 'boolean') o[k] = n; });
+  CAREER_BOOL.forEach(k => { if (typeof c[k] === 'boolean') o[k] = c[k]; });
+  const d = day(c.advance_recovered_date); if (d) o.advance_recovered_date = d;
+  return o;
+}
+function normEarn(e) {
+  if (!e || typeof e !== 'object') return null;
+  return { gross: num(e.gross), basis: str(e.basis), withholding: num(e.labor_withholding_10pct), nhi: num(e.nhi_2_11pct), advance: num(e.advance), net: num(e.net), hours: num(e.hours), hoursBasis: str(e.hours_basis), hourly: num(e.hourly_net) };
+}
 export function normalize(r) {
   return {
     id: str(r.id), title: str(r.title), shortTitle: str(r.short_title), org: str(r.org),
     basket: BASKET[r.basket] || 'other',
-    status: r.status === 'stashed' ? 'snoozed' : (['new', 'doing', 'dropped', 'expired', 'closed'].includes(r.status) ? r.status : 'new'),
+    status: r.status === 'stashed' ? 'snoozed' : (['new', 'doing', 'delivered', 'paid', 'dropped', 'expired', 'closed'].includes(r.status) ? r.status : 'new'),
     closeResult: ['won', 'lost', 'submitted', 'void'].includes(r.close_result) ? r.close_result : '', closedAt: ts(r.closed_at), decidedAt: ts(r.decided_at),
     amountLabel: str(r.amount_label), currency: str(r.currency), amountDisplay: str(r.amount_display),
     deadline: ts(r.deadline), deadlineText: str(r.deadline_text), deadlineApprox: !!r.deadline_approx,
@@ -102,7 +118,12 @@ export function normalize(r) {
     crawlStatus: str(r.crawl_status) || 'none', crawlError: str(r.crawl_error), hasFullText: !!r.has_full_text,
     detailText: str(r.full_text), attachments: Array.isArray(r.attachments) ? r.attachments.filter(a => a && web(a.url)) : [],
     folderStatus: str(r.folder_status) || 'none', folderError: str(r.folder_error), folderName: str(r.folder_name), folderPath: str(r.folder_path), notionUrl: web(r.notion_url),
-    dropReason: str(r.drop_reason),
+    dropReason: str(r.drop_reason), dropNote: str(r.drop_note),
+    // 案務：報價、收款、職涯欄位、實拿時薪（後端算好，不手填）
+    quoteAmount: num(r.quote_amount), signed: r.signed == null ? null : !!r.signed,
+    depositAmount: num(r.deposit_amount), depositDate: day(r.deposit_date), finalAmount: num(r.final_amount), finalDue: day(r.final_due),
+    deliveryDate: day(r.delivery_date), paymentTerms: str(r.payment_terms), receivedAmount: num(r.received_amount), expectedPayDate: day(r.expected_pay_date),
+    deliveredAt: ts(r.delivered_at), paidAt: ts(r.paid_at), career: normCareer(r.career), earnings: normEarn(r.earnings),
     // 檔案與付款連結：pool／review 可以是本機絕對路徑（個人案）或 https；pay、other 只收 https
     links: (Array.isArray(r.links) ? r.links : []).map(l => l && typeof l === 'object' ? {
       kind: ['pool', 'review', 'pay', 'other'].includes(l.kind) ? l.kind : 'other', label: str(l.label), amount: str(l.amount),
@@ -115,7 +136,7 @@ export function normalize(r) {
 function liveAdapter() {
   const base = CONFIG.SUPABASE_URL.replace(/\/+$/, '');
   const headers = { 'content-type': 'application/json', apikey: CONFIG.SUPABASE_ANON_KEY };
-  async function rpc(name, body, timeout) {
+  async function rpc(name, body, timeout, opt) {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), timeout || CONFIG.TIMEOUT_MS);
     let res;
@@ -126,19 +147,20 @@ function liveAdapter() {
     try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = txt; }
     if (!res.ok) {
       const msg = String((data && (data.message || data.error || data.hint)) || ('HTTP ' + res.status));
+      if (res.status === 403 && opt && opt.work) throw new AdapterError('forbidden', msg, 403);   // 案務 RPC：這把金鑰不能改案務（不是金鑰失效），不清金鑰
       if (res.status === 401 || res.status === 403) { LS.del(CONFIG.SNAPSHOT_KEY + ':' + keyTag()); LS.del(CONFIG.KEY_STORAGE); KEY = ''; throw new AdapterError('auth', msg, res.status); }
       throw new AdapterError(res.status === 400 || res.status === 422 ? 'state' : 'server', msg, res.status);
     }
     return data;
   }
   const card = d => { d = Array.isArray(d) ? d[0] : d; return d && typeof d === 'object' && d.id ? normalize(d) : null; };
-  const R = CONFIG.RPC;
+  const R = CONFIG.RPC, W = { work: true };
   return {
     mode: 'live',
     async list() {
       const d = await rpc(R.list, { p_gone_hours: CONFIG.GONE_HOURS });
       if (!d || !Array.isArray(d.items)) throw new AdapterError('server', '回傳格式不對');
-      const all = [].concat(d.items, d.doing || [], d.gone || []).map(normalize);
+      const all = [].concat(d.items, d.doing || [], d.delivered || [], d.paid || [], d.gone || []).map(normalize);
       return { items: all, serverTime: ts(d.server_time) };
     },
     async get(id) { return card(await rpc(R.get, { p_id: id })); },
@@ -163,6 +185,10 @@ function liveAdapter() {
         case 'close': return card(await rpc(R.close, { p_id: id, p_result: o.result }));
         case 'reopen': return card(await rpc(R.reopen, { p_id: id }));
         case 'purge': await rpc(R.purge, { p_id: id, p_confirm: o.confirm }); return null;
+        case 'work': return card(await rpc(R.workUpdate, { p_id: id, p_patch: o.patch || {} }, 0, W));
+        case 'deliver': return card(await rpc(R.setStatus, { p_id: id, p_status: 'delivered', ...(o.patch ? { p_patch: o.patch } : {}) }, 0, W));
+        case 'paid': return card(await rpc(R.setStatus, { p_id: id, p_status: 'paid', p_patch: o.patch || {} }, 0, W));
+        case 'back': return card(await rpc(R.setStatus, { p_id: id, p_status: o.to === 'delivered' ? 'delivered' : 'doing' }, 0, W));
       }
       throw new AdapterError('server', '未知動作');
     },

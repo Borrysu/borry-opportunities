@@ -13,9 +13,10 @@
 //   crawlhang    爬全文一直不回來（看 60 秒逾時）
 //   setfail      刪掉、暫存、不做、要做一律失敗（看回復）
 //   folderslow   要做之後，資料夾 12 秒後才建好
+//   （v17）示範資料另有：既有案（進行中）、已交件、已收款各一張，剛收走的有一張附收走原因
 //   xss          第一張卡的文字欄都塞惡意 HTML、連結改成 javascript:（驗跳脫用，window.__xss 應一直是 undefined）
 //   以上資料一律轉成後端（opp_list）的欄位格式再交給 normalize，所以示範與真後端走同一條路。
-import { AdapterError, normalize, normScan, normHistory } from './adapter.js?v16';
+import { AdapterError, normalize, normScan, normHistory } from './adapter.js?v17';
 
 const H = 3600e3, D = 24 * H;
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -85,7 +86,42 @@ function toBackend(r) {
   o.expire_at = r.expires_at; o.created_at = r.found_at; o.remind_at = r.snooze_until || null;
   o.short_title = null; o.crawl_status = 'none'; o.crawl_error = null; o.has_full_text = false; o.full_text = '';
   o.folder_status = 'none'; o.folder_path = null; o.folder_name = null; o.folder_error = null; o.notion_url = null; o.drop_reason = null; o.attachments = []; o.links = [];
+  o.career = r.career || {}; o.drop_note = r.drop_note || null;
   return o;
+}
+// 照後端 _opp_earnings 算實拿與時薪（示範用，真資料由資料庫算）
+function earn(r) {
+  const n = v => v == null ? null : +v, c = r.career || {};
+  let gross, basis;
+  if (n(r.received_amount) > 0) { gross = n(r.received_amount); basis = 'received'; }
+  else if (r.quote_amount == null && r.deposit_amount == null && r.final_amount == null) return null;
+  else { gross = Math.max(n(r.quote_amount) || 0, (n(r.deposit_amount) || 0) + (n(r.final_amount) || 0)); basis = 'expected'; }
+  const wh = c.tax_withheld === false ? 0 : Math.round(gross * 0.10), nhi = c.tax_withheld === false ? 0 : Math.round(gross * 0.0211);
+  const adv = +c.advance_amount || 0, net = gross - wh - nhi - adv;
+  const hours = c.actual_hours > 0 ? c.actual_hours : c.est_hours > 0 ? c.est_hours : null, hb = c.actual_hours > 0 ? 'actual' : hours ? 'estimated' : null;
+  return { gross, basis, labor_withholding_10pct: wh, nhi_2_11pct: nhi, advance: adv, net, hours, hours_basis: hb, hourly_net: hours ? Math.round(net / hours) : null };
+}
+const WORK_KEYS = ['quote_amount', 'signed', 'deposit_amount', 'deposit_date', 'final_amount', 'final_due', 'delivery_date', 'payment_terms', 'received_amount', 'expected_pay_date', 'drop_note', 'career'];
+function applyWork(r, j) {
+  for (const k of Object.keys(j)) if (!WORK_KEYS.includes(k)) throw new AdapterError('state', 'unknown field: ' + k, 400);
+  for (const k of WORK_KEYS) if (k !== 'career' && k in j) r[k] = j[k] === '' ? null : j[k];
+  if (j.career && typeof j.career === 'object') { const c = Object.assign({}, r.career || {}); for (const [k, v] of Object.entries(j.career)) { if (v == null) delete c[k]; else c[k] = v; } r.career = c; }
+}
+const today = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); };
+const dayOff = n => { const d = new Date(Date.now() + n * D), p = x => String(x).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); };
+// 案務示範卡：集集記進來的既有案，沒有建資料夾
+function workRows() {
+  const base = (o) => Object.assign(toBackend({ basket: 'personal', title: '', org: '示意資料', found_at: new Date(Date.now() - 10 * D).toISOString(), expires_at: null, found_by: 'Gig Gig', is_demo: true, why: '', quick: [], facts: [], warn: [] }),
+    { source_site: '既有案', folder_status: 'done', folder_path: '（既有案，沒有建資料夾）', decided_at: new Date(Date.now() - 10 * D).toISOString() }, o);
+  return [
+    base({ id: 'work-doing', status: 'doing', title: '某品牌形象短片導演（示意）', quote_amount: 120000, signed: true, deposit_amount: 36000, deposit_date: dayOff(-6), final_amount: 84000, final_due: dayOff(30), payment_terms: '簽約付三成，交片後 30 天付尾款',
+      career: { line: '個人導演', public_identity: '導演 Borry', status_gain: '中', status_gain_note: '品牌會在片尾掛導演名', est_hours: 60, tax_withheld: true, referrer: '朋友介紹', kim_judgment: '錢普通，但能放作品集。' } }),
+    base({ id: 'work-delivered', status: 'delivered', title: 'AI 影片比賽代製（示意）', basket: 'other', quote_amount: 30000, delivery_date: dayOff(-2), delivered_at: new Date(Date.now() - 2 * D).toISOString(), expected_pay_date: dayOff(12), payment_terms: '交件後兩週匯款',
+      career: { line: 'AI 影片與比賽', est_hours: 12, actual_hours: 15, tax_withheld: false } }),
+    base({ id: 'work-paid', status: 'paid', title: '工作坊講師鐘點（示意）', basket: 'achievement', quote_amount: 8000, received_amount: 7200, delivery_date: dayOff(-20), delivered_at: new Date(Date.now() - 20 * D).toISOString(), paid_at: new Date(Date.now() - 5 * D).toISOString(),
+      career: { line: '教學授權', actual_hours: 4, advance_amount: 300, advance_recovered_date: dayOff(-5) } }),
+    base({ id: 'work-gone', status: 'dropped', drop_reason: 'skipped', title: '婚禮紀錄側拍（示意）', folder_status: 'none', folder_path: null, source_site: 'PRO360', drop_note: '日期跟另一案撞期' }),
+  ];
 }
 
 export function mockAdapter(modeStr) {
@@ -95,19 +131,23 @@ export function mockAdapter(modeStr) {
   if (rows[0] && !flags.has('xss')) rows[0].links = [{ kind: 'pay', label: '去領標付款', url: 'https://web.pcc.gov.tw/', amount: 'NT$ 200' }];   // 示範：還沒說要做也能領標
   if (rows.length > 3 && !flags.has('xss')) Object.assign(rows[rows.length - 1], { status: 'closed', close_result: 'won', closed_at: new Date(Date.now() - 3 * D).toISOString(), decided_at: new Date(Date.now() - 20 * D).toISOString(),
     folder_status: 'done', folder_name: '10-27_示意結案', links: [{ kind: 'pool', label: 'Pool（官方文件、標書、成品）', path: '/Users/borry/Desktop/示意/10-27_示意結案' }, { kind: 'review', label: '內審（製作過程）', path: '/Users/borry/Desktop/示意/10-27_示意結案/製作2026-10-27' }] });
+  if (!flags.has('empty')) rows = rows.concat(workRows());   // 放在「示意結案」之後，免得被當成最後一張改成結案
   if (flags.has('xss') && rows[0]) {
     const bad = '<img src=x onerror="window.__xss=1">';
     Object.assign(rows[0], { title: bad + '惡意測試卡', org: bad, why: bad, deadline_text: bad, amount_display: bad, first_step: bad,
       quick: [bad], facts: ['欄位：' + bad], warn: [bad], source_url: 'javascript:window.__xss=2', notion_url: 'javascript:window.__xss=3',
       attachments: [{ name: bad, url: 'javascript:window.__xss=4' }],
       status: 'doing', folder_status: 'done', folder_path: '/Users/x/' + bad, decided_at: new Date().toISOString(),
-      links: [{ kind: 'pay', label: bad, url: 'javascript:window.__xss=5', amount: bad }, { kind: 'pool', label: bad, path: '/a/' + bad }, { kind: 'review', label: bad, url: 'https://x.test/' + bad }] });
+      links: [{ kind: 'pay', label: bad, url: 'javascript:window.__xss=5', amount: bad }, { kind: 'pool', label: bad, path: '/a/' + bad }, { kind: 'review', label: bad, url: 'https://x.test/' + bad }],
+      payment_terms: bad, quote_amount: bad, deposit_date: bad, career: { line: bad, public_identity: bad, status_gain: bad, rights: bad, kim_judgment: bad, referrer: bad, est_hours: bad } });
+    const g = rows.find(r => r.id === 'work-gone'); if (g) g.drop_note = bad;
+    const w = rows.find(r => r.id === 'work-delivered'); if (w) Object.assign(w, { payment_terms: bad, title: bad + '已交件惡意卡', source_site: bad });
   }
   const listeners = new Set();
   const scans = {};   // 示範：立即掃描叫過的紀錄（示範模式不會真的叫集集）
   const ping = () => listeners.forEach(f => f());
   const find = id => { const r = rows.find(x => x.id === id); if (!r) throw new AdapterError('server', '找不到這筆'); return r; };
-  const view = r => { const o = Object.assign({}, r); delete o.full_text; o.has_full_text = !!r.full_text; return o; };
+  const view = r => { const o = Object.assign({}, r); delete o.full_text; o.has_full_text = !!r.full_text; o.earnings = earn(r); return o; };
   const sorry = () => { if (flags.has('setfail')) throw new AdapterError('server', '伺服器沒有回應'); };
   let nextN = 0;
   const WEEK = 7 * D;
@@ -129,7 +169,7 @@ export function mockAdapter(modeStr) {
     },
     async scanRequest(basket) { await wait(300); sorry(); const b = { funding: 'fund', achievement: 'honor' }[basket] || basket; if (scans[b] && Date.now() - Date.parse(scans[b].requested_at) < 60e3) return { ok: true, throttled: true }; scans[b] = { status: 'sent', requested_at: new Date().toISOString() }; setTimeout(ping, 50); return { ok: true }; },
     async scanStatus() { await wait(100); return normScan(Object.fromEntries(['company', 'personal', 'other', 'fund', 'honor'].map(b => [b, { open: scans[b] || null, last: b === 'company' ? { done_at: new Date(Date.now() - 5 * H).toISOString(), added: 2 } : null }]))); },
-    async history(id) { await wait(150); const r = find(id); return normHistory([{ at: r.created_at || new Date().toISOString(), actor: r.found_by || 'Gig Gig', action: '找到這個機會' }].concat(r.status === 'doing' || r.status === 'closed' ? [{ at: new Date().toISOString(), actor: 'Borry', action: '要做' }] : []).reverse()); },
+    async history(id) { await wait(150); const r = find(id); return normHistory([{ at: r.created_at || new Date().toISOString(), actor: r.found_by || 'Gig Gig', action: '找到這個機會' }].concat(['doing', 'delivered', 'paid', 'closed'].includes(r.status) ? [{ at: new Date().toISOString(), actor: 'Borry', action: '要做' }] : []).reverse()); },
     async archive(q, year) {
       await wait(200);
       const cl = rows.filter(r => r.status === 'closed'), yr = r => new Date(r.closed_at).getFullYear();
@@ -154,9 +194,19 @@ export function mockAdapter(modeStr) {
           setTimeout(() => { r.folder_status = 'done'; r.folder_path = '（示意資料，沒有建資料夾）'; r.links = [{ kind: 'pool', label: 'Pool（官方文件、標書、成品）', path: '/Users/borry/Desktop/示意/11-16_示意案' }, { kind: 'review', label: '內審（製作過程）', path: '/Users/borry/Desktop/示意/11-16_示意案/製作2026-11-16' }, { kind: 'pay', label: '去領標付款', url: 'https://web.pcc.gov.tw/', amount: 'NT$ 200' }]; ping(); }, flags.has('folderslow') ? 12000 : 3000);
           break;
         }
-        case 'close': if (!['doing', 'closed'].includes(r.status)) throw new AdapterError('state', 'card is ' + r.status, 400); r.status = 'closed'; r.close_result = o.result; r.closed_at = new Date().toISOString(); break;
+        case 'work': applyWork(r, o.patch || {}); break;
+        case 'deliver': if (!['doing', 'delivered'].includes(r.status)) throw new AdapterError('state', 'cannot go from ' + r.status + ' to delivered', 400);
+          if (o.patch) applyWork(r, o.patch); if (r.status === 'doing') { r.status = 'delivered'; r.delivery_date = r.delivery_date || today(); r.delivered_at = r.delivered_at || new Date().toISOString(); } break;
+        case 'paid': if (!['delivered', 'paid'].includes(r.status)) throw new AdapterError('state', 'cannot go from ' + r.status + ' to paid', 400);
+          if (o.patch) applyWork(r, o.patch); if (r.status === 'paid') break;
+          if (r.received_amount == null) throw new AdapterError('state', 'received_amount required for paid (put it in p_patch)', 400);
+          r.status = 'paid'; r.paid_at = new Date().toISOString(); break;
+        case 'back': { const to = o.to === 'delivered' ? 'delivered' : 'doing';
+          if (!((r.status === 'delivered' && to === 'doing') || (r.status === 'paid' && to === 'delivered') || r.status === to)) throw new AdapterError('state', 'cannot go from ' + r.status + ' to ' + to, 400);
+          if (r.status !== to) { r.status = to; r.paid_at = null; if (to === 'doing') r.delivered_at = null; } break; }
+        case 'close': if (!['doing', 'delivered', 'paid', 'closed'].includes(r.status)) throw new AdapterError('state', 'card is ' + r.status, 400); r.status = 'closed'; r.close_result = o.result; r.closed_at = new Date().toISOString(); break;
         case 'reopen': if (r.status !== 'closed') throw new AdapterError('state', 'card is not closed', 400); r.status = 'doing'; r.close_result = null; r.closed_at = null; break;
-        case 'purge': if (!['closed', 'dropped', 'expired', 'doing'].includes(r.status)) throw new AdapterError('state', 'cannot purge', 400); if (o.confirm !== r.title && o.confirm !== (r.short_title || r.title)) throw new AdapterError('state', 'confirm text does not match title', 400); rows.splice(rows.indexOf(r), 1); ping(); return null;
+        case 'purge': if (!['closed', 'dropped', 'expired', 'doing', 'delivered', 'paid'].includes(r.status)) throw new AdapterError('state', 'cannot purge', 400); if (o.confirm !== r.title && o.confirm !== (r.short_title || r.title)) throw new AdapterError('state', 'confirm text does not match title', 400); rows.splice(rows.indexOf(r), 1); ping(); return null;
         case 'dive': {
           if (r.crawl_status === 'crawling' || (r.crawl_status === 'done' && !o.force)) break;
           r.crawl_status = 'crawling'; r.crawl_error = null;

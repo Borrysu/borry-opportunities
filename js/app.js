@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v16';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v16';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v17';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v17';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -32,6 +32,9 @@ const S = {
   scan: {},             // 各籃立即掃描的單：{open, last}
   hist: new Map(),      // 卡片動作紀錄：id → [{at, actor, action}]
   arch: { open: false, q: '', year: '', items: [], years: [], busy: false, err: '', loaded: false },   // 封存區
+  draft: new Map(),     // 案務欄位還沒存的輸入：id → {欄位: 字串}；重繪時照填回去
+  goneOpen: false,      // 「剛收走的」有沒有展開
+  careerOpen: new Set(), // 哪些卡的「職涯與工時」展開著
 };
 let api, lastFocus = null, sigLast = '', depth = 0, ignorePop = false;
 const locks = new Set(), mutDone = {};
@@ -40,6 +43,11 @@ const tnow = () => Date.now() + OFF;
 
 const items = () => [...S.items.values()];
 const get = id => S.items.get(id) || S.arch.items.find(i => i.id === id);
+const WORK = new Set(['doing', 'delivered', 'paid']);       // 進行中、已交件、已收款：都開資料夾抽屜
+const isWork = it => !!it && WORK.has(it.status);
+const isOld = it => it.sourceSite === '既有案';             // 集集直接記進來的既有案，沒有建資料夾
+const editing = box => { const a = document.activeElement; return !!(a && box && box.contains(a) && a.matches('input,select,textarea')); };
+const money = n => n == null ? '' : 'NT$ ' + Math.round(n).toLocaleString('zh-TW');
 
 // ---------------- 倒數（只做顯示；真正收走看資料庫的 status 與 expires_at） ----------------
 function target(it) {
@@ -202,6 +210,8 @@ function edgeFade() {
 // ---------------- 畫面：待決區 ----------------
 const holdItems = () => sortList(items().filter(i => i.status === 'snoozed'));
 const doingItems = () => items().filter(i => i.status === 'doing').sort((a, b) => (a.deadline || Infinity) - (b.deadline || Infinity) || (b.decidedAt || 0) - (a.decidedAt || 0));   // 最急的在最上面（Borry 2026-11-16），沒截止日的排最後
+const deliveredItems = () => items().filter(i => i.status === 'delivered').sort((a, b) => (a.expectedPayDate || '9999').localeCompare(b.expectedPayDate || '9999') || (b.deliveredAt || 0) - (a.deliveredAt || 0));   // 最快入帳的在上面
+const paidItems = () => items().filter(i => i.status === 'paid').sort((a, b) => (b.paidAt || 0) - (a.paidAt || 0));
 const goneItems = () => items().filter(i => i.status === 'dropped' || i.status === 'expired').slice(0, 50);
 
 function pcard(it) {
@@ -229,7 +239,7 @@ async function loadHistory(id) {
   try { if (!api.history) return; const h = await api.history(id); S.hist.set(id, h); if (S.drawer && S.drawer.id === id) renderDrawer(); } catch (e) {}
 }
 function bidBox(it) {      // 還沒說要做的卡也能領標：領標是拿詳細資料，不代表要做（Borry 2026-11-16）
-  if (it.status === 'doing' || !linkOf(it, 'pay')) return '';
+  if (isWork(it) || !linkOf(it, 'pay')) return '';
   return '<section class="paybox"><h3>領標</h3><p>領標是先拿到詳細資料，不代表要做。AI 做到付款頁就停，付款那一下要你本人來。</p>' + payBtn(it, 'btn btn-primary') + '</section>';
 }
 function histHTML(it) {     // 誰、什麼時候、做了什麼
@@ -238,7 +248,7 @@ function histHTML(it) {     // 誰、什麼時候、做了什麼
 }
 const RES = { won: '得標／核定', lost: '未得標', submitted: '已送件結案', void: '作廢（做一半不要了）' };
 function closeBox(it) {
-  if (it.status !== 'doing') return '';
+  if (!isWork(it)) return '';
   return '<section class="closebox"><h3>結案</h3><p>做完或不做了，就收進封存區，以後找檔案從封存區找。</p><div class="cb">' +
     Object.keys(RES).map(k => '<button class="btn btn-ghost' + (k === 'void' ? ' del' : '') + '" data-act="close" data-r="' + k + '" data-id="' + esc(it.id) + '" type="button">' + RES[k] + '</button>').join('') +
     '<button class="btn btn-ghost del purge" data-act="purge" data-id="' + esc(it.id) + '" type="button">徹底刪除（不進封存區）</button></div></section>';
@@ -277,29 +287,37 @@ async function archAct(id, action, opt, okMsg) {
 const folderState = it => it.folderStatus === 'done' ? 'done' : it.folderStatus === 'failed' ? 'failed' : 'wait';
 function dcard(it) {
   const id = esc(it.id), fs = folderState(it);
-  const st = fs === 'done' ? '工作資料夾建好了' : fs === 'failed' ? '資料夾沒建成，請找通通' : '<span class="spin"></span>' + (it.folderStatus === 'building' ? '正在建立工作資料夾' : '已排隊，等 Mac 接工作');
-  return '<article class="pc' + (fs === 'done' ? ' done' : '') + '" data-id="' + id + '">' + '<div class="dt-tags" style="margin:0">' + chip(it) + demo(it) + '</div><h3 class="sb">' + softBreak(it.title) + '</h3>' +
-    '<p class="st">' + st + '</p><div class="pa">' + payBtn(it, 'pp') + '<button class="pg" data-act="open-folder" data-id="' + id + '" type="button">' + (fs === 'done' ? '看資料夾位置' : '看進度') + '</button></div></article>';
+  let st = fs === 'done' ? (isOld(it) ? '既有案，沒有建資料夾' : '工作資料夾建好了') : fs === 'failed' ? '資料夾沒建成，請找通通' : '<span class="spin"></span>' + (it.folderStatus === 'building' ? '正在建立工作資料夾' : '已排隊，等 Mac 接工作');
+  if (it.status === 'delivered') st = '已交件' + (it.deliveryDate ? '（' + esc(it.deliveryDate) + '）' : '') + '，' + (it.expectedPayDate ? '預計 ' + esc(it.expectedPayDate) + ' 入帳' : '等收款');
+  if (it.status === 'paid') st = '已收款' + (it.receivedAmount != null ? ' ' + money(it.receivedAmount) : '') + (it.paidAt ? '，' + fmtClock(it.paidAt) : '');
+  return '<article class="pc' + (fs === 'done' && it.status === 'doing' ? ' done' : '') + '" data-id="' + id + '">' + '<div class="dt-tags" style="margin:0">' + chip(it) + demo(it) + '</div><h3 class="sb">' + softBreak(it.title) + '</h3>' +
+    '<p class="st">' + st + '</p><div class="pa">' + payBtn(it, 'pp') + '<button class="pg" data-act="open-folder" data-id="' + id + '" type="button">' + (it.status !== 'doing' || isOld(it) ? '看案務' : fs === 'done' ? '看資料夾位置' : '看進度') + '</button></div></article>';
 }
 const goneWhy = it => it.dropReason === 'deleted' ? '你刪掉的' : it.dropReason === 'skipped' ? '你決定不做的' : '時間到，自動收走';
 function gcard(it) {
   const id = esc(it.id);
   const past = it.deadline && it.deadline <= tnow();
+  const d = S.draft.get(it.id), note = d && d.drop_note != null ? d.drop_note : (it.dropNote || '');
   return '<article class="pc" data-id="' + id + '"><h3 class="sb">' + softBreak(it.title) + '</h3><p class="st">' + goneWhy(it) + (past ? '<br>截止已過，救不回來' : '') + '</p>' +
+    '<div class="dnote"><textarea rows="2" data-wf="drop_note" data-id="' + id + '" aria-label="收走的原因" placeholder="為什麼收走（自己記，之後回頭看）">' + esc(note) + '</textarea>' +
+    '<button class="btn btn-ghost" data-act="save-note" data-id="' + id + '" type="button">存原因</button></div>' +
     (past ? '' : '<div class="pa"><button data-act="restore" data-id="' + id + '" type="button">救回來</button></div>') + '</article>';
 }
 function renderSheet() {
   if (S.arch.open) return renderArchive();
-  const h = holdItems(), d = doingItems(), g = goneItems();
+  const h = holdItems(), d = doingItems(), dv = deliveredItems(), pd = paidItems(), g = goneItems();
   $('#hpill').hidden = $('#holdbtn').hidden = S.net === 'auth';
   $('#holdbtn').innerHTML = '待決區<b>' + h.length + '</b>';
   $('#hpill').innerHTML = '待決區<b>' + h.length + '</b>';
   const sh = $('#sheet'); const sc = sh.querySelector('.db') ? sh.querySelector('.db').scrollTop : 0;
+  if (editing(sh)) { sh.classList.toggle('show', S.sheet); return; }   // 正在填「收走原因」：輪詢不重畫，免得字不見
   let body = '';
-  if (!h.length && !d.length) body += '<div class="zero"><b>待決區是空的</b><span>按「暫存」的機會會放在這裡，到時候集集會傳訊息提醒你。</span></div>';
+  if (!h.length && !d.length && !dv.length && !pd.length) body += '<div class="zero"><b>待決區是空的</b><span>按「暫存」的機會會放在這裡，到時候集集會傳訊息提醒你。</span></div>';
   if (h.length) body += '<p class="grp">暫存中，' + h.length + ' 筆</p>' + h.map(pcard).join('');
   if (d.length) body += '<p class="grp">你說要做，' + d.length + ' 筆</p>' + d.map(dcard).join('');
-  if (g.length) body += '<details class="gone"><summary>剛收走的，' + g.length + ' 筆，72 小時內可以救回來</summary>' + g.map(gcard).join('') + '</details>';
+  if (dv.length) body += '<p class="grp">已交件，' + dv.length + ' 筆</p>' + dv.map(dcard).join('');
+  if (pd.length) body += '<p class="grp">已收款，' + pd.length + ' 筆</p>' + pd.map(dcard).join('');
+  if (g.length) body += '<details class="gone"' + (S.goneOpen ? ' open' : '') + '><summary>剛收走的，' + g.length + ' 筆，72 小時內可以救回來</summary>' + g.map(gcard).join('') + '</details>';
   body += '<button class="btn btn-ghost arch-in" data-act="open-archive" type="button">封存區：結案與作廢的案子</button>';
   body += '<p class="sheet-note">提醒由集集傳訊息給你，網頁自己不會跳通知。</p>';
   sh.innerHTML = '<div class="dh"><span>待決區</span><button class="xb" data-act="close-hold" type="button" aria-label="關閉待決區">×</button></div><div class="db">' + body + '</div>';
@@ -310,7 +328,7 @@ function renderSheet() {
 // ---------------- 畫面：詳細資料抽屜 ----------------
 function viewOf() {
   const it = S.drawer && get(S.drawer.id); if (!it) return null;
-  return it.status === 'doing' ? 'folder' : S.drawer.view;
+  return isWork(it) ? 'folder' : S.drawer.view;
 }
 function statBlock(it) {
   const t = target(it), lv = lvOf(it);
@@ -371,25 +389,135 @@ function fullHTML(it) {
     warnBox(it.warn) + bidBox(it) + crawlHTML(it) + firstBox(it) + facts +
     '<section class="dt-sec dt-src"><h3>來源</h3>' + metaLine(it) + link(it) + '</section>' + histHTML(it) + '</div>';
 }
+// ---------------- 案務：報價、收款、職涯欄位（doing／delivered／paid 的抽屜） ----------------
+// 欄位名稱照後端 opp_work_update 的 p_patch；career.* 是合併寫入，空白＝移除該鍵。
+const LINES = ['公司正職', '個人導演', 'nightdesk 標案代寫', 'AI 影片與比賽', '教學授權'];
+const WF = [   // [後端鍵, 前端屬性, 標題, 型別, 寬]
+  ['quote_amount', 'quoteAmount', '報價', 'num'], ['signed', 'signed', '簽約', 'yn'],
+  ['deposit_amount', 'depositAmount', '訂金', 'num'], ['deposit_date', 'depositDate', '訂金入帳日', 'date'],
+  ['final_amount', 'finalAmount', '尾款', 'num'], ['final_due', 'finalDue', '尾款到期', 'date'],
+  ['delivery_date', 'deliveryDate', '交件日', 'date'], ['expected_pay_date', 'expectedPayDate', '預計入帳日', 'date'],
+  ['received_amount', 'receivedAmount', '實收金額', 'num'], ['payment_terms', 'paymentTerms', '付款條件', 'text', 1],
+];
+const CF = [   // career 內的鍵
+  ['line', '路線', 'sel', 0, LINES], ['public_identity', '對外掛名', 'text'], ['referrer', '介紹人', 'text'],
+  ['status_gain', '地位加分', 'sel', 0, ['高', '中', '低']], ['conflicts_haoka', '跟好咖衝突', 'yn'],
+  ['status_gain_note', '地位加分說明', 'text', 1], ['rights', '權利歸屬', 'text', 1],
+  ['est_hours', '預估工時（小時）', 'num'], ['actual_hours', '實際工時（小時）', 'num'],
+  ['advance_amount', '代墊金額', 'num'], ['advance_recovered_date', '代墊收回日', 'date'],
+  ['tax_withheld', '扣繳 10%＋二代健保', 'tax'], ['kim_judgment', '金金的判斷', 'area', 1],
+];
+const WK = WF.map(f => f[0]), CK = CF.map(f => 'c.' + f[0]);
+const curStr = (it, k) => {        // 後端現在的值 → 輸入框字串
+  let v;
+  if (k.startsWith('c.')) v = (it.career || {})[k.slice(2)];
+  else { const f = WF.find(x => x[0] === k); v = f ? it[f[1]] : it[k]; }
+  return v == null ? '' : typeof v === 'boolean' ? String(v) : String(v);
+};
+const valStr = (it, k) => { const d = S.draft.get(it.id); return d && d[k] != null ? d[k] : curStr(it, k); };
+function fieldHTML(it, k, label, type, wide, opts) {
+  const id = esc(it.id), v = valStr(it, k), a = ' data-wf="' + esc(k) + '" data-id="' + id + '" aria-label="' + esc(label) + '"';
+  let inp;
+  if (type === 'num') inp = '<input type="number" inputmode="decimal" min="0" step="any"' + a + ' value="' + esc(v) + '">';
+  else if (type === 'date') inp = '<input type="date"' + a + ' value="' + esc(v) + '">';
+  else if (type === 'area') inp = '<textarea rows="3"' + a + '>' + esc(v) + '</textarea>';
+  else if (type === 'text') inp = '<input type="text"' + a + ' value="' + esc(v) + '">';
+  else {
+    const o = type === 'yn' ? [['', '沒填'], ['true', '是'], ['false', '否']] : type === 'tax' ? [['', '沒填（照預設會扣）'], ['true', '會扣'], ['false', '不扣']]
+      : [['', '沒填']].concat(opts.map(x => [x, x]));
+    if (type === 'sel' && v && !opts.includes(v)) o.push([v, v]);
+    inp = '<select' + a + '>' + o.map(([ov, ot]) => '<option value="' + esc(ov) + '"' + (ov === v ? ' selected' : '') + '>' + esc(ot) + '</option>').join('') + '</select>';
+  }
+  return '<label class="wf' + (wide ? ' w' : '') + '"><span>' + esc(label) + '</span>' + inp + '</label>';
+}
+function dirty(it) { const d = S.draft.get(it.id); return !!d && Object.keys(d).some(k => k !== 'drop_note' && d[k] !== curStr(it, k)); }
+function earnHTML(it) {
+  const e = it.earnings;
+  if (!e || e.net == null) return '<div class="earn"><p class="dt-meta">還沒有金額，填了報價、訂金尾款或實收，存檔後會算出實拿與時薪。</p></div>';
+  const basis = e.basis === 'received' ? '實收' : '預估';
+  const parts = [money(e.gross) + '（' + (e.basis === 'received' ? '實收' : '照報價／訂金＋尾款預估') + '）'];
+  if (e.withholding) parts.push('扣繳 ' + money(e.withholding)); if (e.nhi) parts.push('二代健保 ' + money(e.nhi)); if (e.advance) parts.push('代墊 ' + money(e.advance));
+  return '<div class="earn"><div class="dt-stats"><div class="dt-stat"><em>實拿（' + basis + '）</em><b>' + esc(money(e.net)) + '</b></div>' +
+    '<div class="dt-stat"><em>時薪' + (e.hourly != null ? '（' + (e.hoursBasis === 'actual' ? '實際工時' : '預估工時') + '）' : '') + '</em><b>' + (e.hourly != null ? esc(money(e.hourly)) : '—') + '</b>' +
+    (e.hourly != null ? '<small>' + esc(String(e.hours)) + ' 小時</small>' : '<small>填工時後才算</small>') + '</div></div>' +
+    '<p class="dt-meta">' + esc(parts.join('，')) + '。' + (dirty(it) ? '有還沒存的修改，存檔後重算。' : '') + '</p></div>';
+}
+function workHTML(it) {
+  const id = esc(it.id), st = it.status;
+  const btns = '<button class="btn btn-ghost" data-act="save-work" data-id="' + id + '" type="button">存檔</button>' +
+    (st === 'doing' ? '<button class="btn btn-primary" data-act="deliver" data-id="' + id + '" type="button">交件</button>' : '') +
+    (st === 'delivered' ? '<button class="btn btn-primary" data-act="paid" data-id="' + id + '" type="button">已收款</button><button class="btn btn-ghost back" data-act="back" data-to="doing" data-id="' + id + '" type="button">退回進行中</button>' : '') +
+    (st === 'paid' ? '<button class="btn btn-ghost back" data-act="back" data-to="delivered" data-id="' + id + '" type="button">退回已交件</button>' : '');
+  const stTxt = st === 'delivered' ? '已交件' + (it.deliveryDate ? '，交件日 ' + esc(it.deliveryDate) : '') + '。收到錢後先填「實收金額」再按「已收款」。'
+    : st === 'paid' ? '已收款' + (it.paidAt ? '，' + fmtDate(it.paidAt) : '') + '。' : '做完交給對方就按「交件」，沒填交件日會記成今天。';
+  return '<section class="work"><h3>案務</h3><p class="dt-meta">' + stTxt + '</p>' + earnHTML(it) +
+    '<div class="wg">' + WF.map(f => fieldHTML(it, f[0], f[2], f[3], f[4])).join('') + '</div>' +
+    '<details class="wc"' + (S.careerOpen && S.careerOpen.has(it.id) ? ' open' : '') + ' data-id="' + id + '"><summary>職涯與工時</summary><div class="wg">' + CF.map(f => fieldHTML(it, 'c.' + f[0], f[1], f[2], f[3], f[4])).join('') + '</div></details>' +
+    '<div class="wb">' + btns + '</div></section>';
+}
+// 草稿 → p_patch（只送有改的欄位）。格式不對回傳 {bad: 欄位}
+function buildPatch(it) {
+  const d = S.draft.get(it.id) || {}, patch = {}, career = {};
+  for (const k of Object.keys(d)) {
+    if (k === 'drop_note' || d[k] === curStr(it, k)) continue;
+    const ck = k.startsWith('c.') ? k.slice(2) : null;
+    const f = ck ? CF.find(x => x[0] === ck) : WF.find(x => x[0] === k); if (!f) continue;
+    const type = ck ? f[2] : f[3], raw = String(d[k]).trim();
+    let v;
+    if (raw === '') v = null;
+    else if (type === 'num') { v = Number(raw); if (!Number.isFinite(v) || v < 0) return { bad: k, label: ck ? f[1] : f[2] }; }
+    else if (type === 'yn' || type === 'tax') v = raw === 'true';
+    else if (type === 'date') { if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return { bad: k, label: ck ? f[1] : f[2] }; v = raw; }
+    else v = raw;
+    if (ck) career[ck] = v; else patch[k] = v;
+  }
+  if (Object.keys(career).length) patch.career = career;
+  return { patch };
+}
+function markBad(id, k, msg) {
+  toast(msg, { bad: true });
+  const el = document.querySelector('#drawer [data-wf="' + CSS.escape(k) + '"][data-id="' + CSS.escape(id) + '"]');
+  if (el) { const dt = el.closest('details'); if (dt) dt.open = true; el.classList.add('bad'); el.focus({ preventScroll: false }); }
+}
+async function saveWork(id, step) {
+  const it = get(id); if (!it || locks.has(id)) return;
+  const r = buildPatch(it);
+  if (r.bad) return markBad(id, r.bad, '「' + r.label + '」格式不對，要填 0 以上的數字或日期');
+  const patch = r.patch, has = Object.keys(patch).length > 0;
+  if (step === 'paid') {
+    const rec = 'received_amount' in patch ? patch.received_amount : it.receivedAmount;
+    if (rec == null) return markBad(id, 'received_amount', '要先填「實收金額」才能按已收款');
+  }
+  if (!step) { if (!has) { toast('沒有要存的修改'); return; } return mutate(id, 'work', '已存檔', null, { patch }); }
+  if (step === 'back') {
+    const to = it.status === 'paid' ? 'delivered' : 'doing';
+    if (!window.confirm('把「' + nm(it) + '」退回「' + (to === 'doing' ? '進行中' : '已交件') + '」？' + (has ? '\n還沒存的修改會先存起來。' : ''))) return;
+    if (has && !(await mutate(id, 'work', null, null, { patch }))) return;
+    return mutate(id, 'back', '已退回' + (to === 'doing' ? '進行中' : '已交件'), null, { to });
+  }
+  return mutate(id, step, step === 'deliver' ? '已交件：' + nm(it) : '已收款：' + nm(it), null, has ? { patch } : {});
+}
 function folderHTML(it) {
   const fs = folderState(it), name = it.folderName ? '「' + esc(it.folderName) + '」' : '';
   if (fs === 'failed') return '<div class="fold"><p class="fold-t"><span class="ok-ic bad" aria-hidden="true">!</span>資料夾沒建成</p><p>' + esc(it.folderError || '原因不明') + '</p><p>請跟通通說，他會處理。這張卡已經記成「要做」，不會不見。</p></div>';
   if (fs !== 'done') return '<div class="fold"><p class="fold-t"><span class="spin"></span>' + (it.folderStatus === 'building' ? '正在建立工作資料夾' : '已排隊，等 Mac 接工作') + '</p><p>Mac 每分鐘接一次工作，通常 1 到 2 分鐘內建好，附件多會久一點。你可以先回到面板，不用等。</p></div>';
   const pay = linkOf(it, 'pay');
   const payBox = pay ? '<section class="paybox"><h3>領標付款</h3><p>AI 做到付款頁就停，付款那一下要你本人來。</p>' + payBtn(it, 'btn btn-primary') + '</section>' : '';
-  const p = it.folderPath, real = /^\//.test(p);
-  return '<div class="fold"><p class="fold-t"><span class="ok-ic" aria-hidden="true">✓</span>' + (real ? '工作資料夾建好了' : '這張是示意卡') + '</p><p>' + (real ? '「' + esc(it.title) + '」的工作都放在這個資料夾。' : '示意卡按「要做」不會真的建資料夾，其他流程跟真的一樣。') + '</p>' +
-    '<div class="path">' + esc(p || it.folderName) + '</div><div class="acts">' +
-    (real ? '<button class="btn btn-primary" data-act="copy-path" data-id="' + esc(it.id) + '" type="button">複製位置</button>' : '') +
-    '</div>' + payBox + filesHTML(it) + histHTML(it) + closeBox(it) + '</div>';
+  const p = it.folderPath, real = /^\//.test(p), old = isOld(it);
+  const top = old ? '<p class="fold-t">既有案，沒有建資料夾</p><p>「' + esc(it.title) + '」是已經在做的案子，直接記進面板，沒有建工作資料夾。</p>'
+    : '<p class="fold-t"><span class="ok-ic" aria-hidden="true">✓</span>' + (real ? '工作資料夾建好了' : '這張是示意卡') + '</p><p>' + (real ? '「' + esc(it.title) + '」的工作都放在這個資料夾。' : '示意卡按「要做」不會真的建資料夾，其他流程跟真的一樣。') + '</p>' +
+      '<div class="path">' + esc(p || it.folderName) + '</div><div class="acts">' +
+      (real ? '<button class="btn btn-primary" data-act="copy-path" data-id="' + esc(it.id) + '" type="button">複製位置</button>' : '') + '</div>';
+  return '<div class="fold">' + top + workHTML(it) + payBox + filesHTML(it) + histHTML(it) + closeBox(it) + '</div>';
 }
 function renderDrawer() {
   const dr = $('#drawer'), it = S.drawer && get(S.drawer.id), view = viewOf();
   if (!it || !view) { dr.classList.remove('show'); return; }
+  if (editing(dr) && dr.dataset.key === it.id + view) return;   // 正在填案務欄位：輪詢不重畫，免得字不見、游標跳走
   const sc = dr.querySelector('.db') && dr.dataset.key === it.id + view ? dr.querySelector('.db').scrollTop : 0;
   const id = esc(it.id); let label, body, foot = '';
   if (view === 'folder') {
-    label = folderState(it) === 'done' ? '已建資料夾' : '建立資料夾';
+    label = it.status === 'delivered' ? '已交件' : it.status === 'paid' ? '已收款' : isOld(it) ? '進行中' : folderState(it) === 'done' ? '已建資料夾' : '建立資料夾';
     body = folderHTML(it);
     foot = '<div class="df"><button class="btn btn-primary" data-act="close-drawer" type="button">回到面板</button></div>';
   } else if (view === 'full') {
@@ -457,18 +585,18 @@ const nextRemind = () => { const d = new Date(tnow()); d.setDate(d.getDate() + 1
 const reason = e => {
   if (!(e instanceof AdapterError)) return '發生錯誤';
   if (e.kind === 'state') return /deadline/i.test(e.message) ? '截止日已經過了，救不回來' : '這張卡的狀態已經變了，已重新同步';
-  return { timeout: '連線逾時', network: '連不上伺服器', offline: '目前沒有網路', auth: '金鑰失效，請重新開 Borry 專屬網址' }[e.kind] || e.message;
+  return { timeout: '連線逾時', network: '連不上伺服器', offline: '目前沒有網路', auth: '金鑰失效，請重新開 Borry 專屬網址', forbidden: '這把金鑰不能改案務，只有 Borry 和集集可以' }[e.kind] || e.message;
 };
 const short = t => t.length > 14 ? t.slice(0, 14) + '…' : t;
 const nm = it => short(it.shortTitle || it.title);
-const NEXT = { stash: 'snoozed', unstash: 'new', deleted: 'dropped', skipped: 'dropped', restore: 'new', build: 'doing', close: 'closed', reopen: 'doing' };
+const NEXT = { stash: 'snoozed', unstash: 'new', deleted: 'dropped', skipped: 'dropped', restore: 'new', build: 'doing', close: 'closed', reopen: 'doing', deliver: 'delivered', paid: 'paid' };
 const mergeCard = (old, res) => ({ ...res, detailText: res.detailText || (old ? old.detailText : ''), attachments: res.attachments.length ? res.attachments : (old ? old.attachments : []) });
 
 async function mutate(id, action, msg, undo, opt = {}) {
   const it = get(id); if (!it || locks.has(id)) return false;
   const prev = { ...it };
   locks.add(id);
-  const next = { ...it, status: NEXT[action] };
+  const next = { ...it, status: action === 'back' ? (opt.to === 'delivered' ? 'delivered' : 'doing') : (NEXT[action] || it.status) };
   if (action === 'stash') next.snoozeUntil = nextRemind();
   if (action === 'unstash' || action === 'restore') next.snoozeUntil = null;
   if (action === 'deleted' || action === 'skipped') next.dropReason = action;
@@ -481,14 +609,15 @@ async function mutate(id, action, msg, undo, opt = {}) {
     const res = await api.act(id, action, opt);
     mutDone[id] = tnow();
     if (res && S.items.has(id)) S.items.set(id, mergeCard(get(id), res));
+    if (opt.patch) S.draft.delete(id);      // 存進去了，草稿清掉，改顯示後端的值
     if (S.hist.has(id)) loadHistory(id);
     saveSnapshot();
     return true;
   } catch (e) {
     S.items.set(id, prev);
     if (e instanceof AdapterError && e.kind === 'auth') { S.net = 'auth'; }
-    toast('沒有成功，已經還原：' + reason(e) + (e.kind === 'auth' ? '' : '。'), { bad: true });
-    if (e instanceof AdapterError && e.kind === 'state') refresh();
+    toast('沒有成功，已經還原：' + (opt.patch && e instanceof AdapterError && e.kind === 'state' ? '欄位格式不對（' + e.message + '）' : reason(e)) + (e.kind === 'auth' ? '' : '。'), { bad: true });
+    if (e instanceof AdapterError && e.kind === 'state' && !opt.patch) refresh();
     return false;
   } finally { locks.delete(id); renderAll(); if (action === 'build') kickPoll(); }
 }
@@ -553,16 +682,19 @@ async function ensureDetail(id, force) {
 }
 
 // ---------------- 讀取：快照、逾時、輪詢、即時 ----------------
+// 舊版快照沒有新欄位：補預設值，畫面不會因 undefined 出錯
+const SNAP_DEF = { detailText: '', quick: [], facts: [], warn: [], dropNote: '', quoteAmount: null, signed: null, depositAmount: null, depositDate: '', finalAmount: null, finalDue: '', deliveryDate: '', paymentTerms: '', receivedAmount: null, expectedPayDate: '', deliveredAt: null, paidAt: null, earnings: null };
 const snapKey = () => CONFIG.SNAPSHOT_KEY + ':' + (api.mode === 'mock' ? 'mock' : keyTag());
 function loadSnapshot() {
-  try { const s = JSON.parse(localStorage.getItem(snapKey()) || 'null'); if (s && Array.isArray(s.items) && s.items.length) { s.items.forEach(i => S.items.set(i.id, i)); S.lastOk = s.at; S.hadData = true; return true; } } catch (e) {}
+  try { const s = JSON.parse(localStorage.getItem(snapKey()) || 'null'); if (s && Array.isArray(s.items) && s.items.length) { s.items.forEach(i => i && i.id && S.items.set(i.id, { ...SNAP_DEF, ...i, career: i.career && typeof i.career === 'object' ? i.career : {}, links: Array.isArray(i.links) ? i.links : [], attachments: Array.isArray(i.attachments) ? i.attachments : [] })); S.lastOk = s.at; S.hadData = true; return true; } } catch (e) {}
   return false;
 }
 function saveSnapshot() {
   try { localStorage.setItem(snapKey(), JSON.stringify({ at: S.lastOk || tnow(), items: items().map(i => ({ ...i, detailText: i.detailText.slice(0, 30000) })) })); } catch (e) {}
 }
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new AdapterError('timeout', '連線逾時')), ms))]);
-const sig = () => JSON.stringify(items().map(i => [i.id, i.status, i.snoozeUntil, i.deadline, i.expiresAt, i.title, i.folderStatus, i.folderPath, i.crawlStatus, i.crawlError, i.detailText.length, i.amountDisplay, i.why]));
+const sig = () => JSON.stringify(items().map(i => [i.id, i.status, i.snoozeUntil, i.deadline, i.expiresAt, i.title, i.folderStatus, i.folderPath, i.crawlStatus, i.crawlError, (i.detailText || '').length, i.amountDisplay, i.why,
+  i.dropNote, i.quoteAmount, i.signed, i.depositAmount, i.depositDate, i.finalAmount, i.finalDue, i.deliveryDate, i.paymentTerms, i.receivedAmount, i.expectedPayDate, i.deliveredAt, i.paidAt, i.career, i.earnings, (i.links || []).length]));
 
 let inflight = false, again = false, pollT, pingT, unsub = () => {};
 async function refresh() {
@@ -656,6 +788,12 @@ document.addEventListener('click', e => {
         if (v.trim() !== it.title.trim() && v.trim() !== (it.shortTitle || it.title).trim()) { toast('案名不對，沒有刪', { bad: true }); break; }
         archAct(id, 'purge', { confirm: v.trim() }, '已徹底刪除'); break; }
       case 'copy-link': { const it = get(id), l = it && it.links[+act.dataset.i]; l && l.path && navigator.clipboard && navigator.clipboard.writeText(l.path).then(() => toast('已複製位置'), () => toast('這個瀏覽器不讓複製，請長按路徑自己複製')); break; }
+      case 'save-work': saveWork(id); break;
+      case 'deliver': saveWork(id, 'deliver'); break;
+      case 'paid': saveWork(id, 'paid'); break;
+      case 'back': saveWork(id, 'back'); break;
+      case 'save-note': { const it = get(id); if (!it) break; const d = S.draft.get(id), v = d && d.drop_note != null ? d.drop_note.trim() : (it.dropNote || '');
+        mutate(id, 'work', '已存收走的原因', null, { patch: { drop_note: v || null } }); break; }
       case 'copy-path': { const it = get(id); navigator.clipboard && it && navigator.clipboard.writeText(it.folderPath).then(() => toast('已複製位置'), () => toast('這個瀏覽器不讓複製，請長按路徑自己複製')); break; }
     }
     return;
@@ -663,13 +801,22 @@ document.addEventListener('click', e => {
   const c = e.target.closest('.card:not(.skel), .pc[data-id]');
   if (c && !e.target.closest('summary,a')) {
     const it = get(c.dataset.id); if (!it || c.closest('.gone')) return;
-    openDrawer(c.dataset.id, it.status === 'doing' ? 'folder' : 'preview');
+    openDrawer(c.dataset.id, isWork(it) ? 'folder' : 'preview');
   }
 });
 document.addEventListener('input', e => {
+  const wf = e.target.dataset && e.target.dataset.wf;
+  if (wf) { const id = e.target.dataset.id, d = S.draft.get(id) || {}; d[wf] = e.target.value; S.draft.set(id, d); e.target.classList.remove('bad'); return; }
   if (e.target.id === 'arch-q') { S.arch.q = e.target.value; clearTimeout(archT); archT = setTimeout(loadArchive, 350); }
 });
+document.addEventListener('toggle', e => {
+  const t = e.target; if (!t.classList) return;
+  if (t.classList.contains('gone')) S.goneOpen = t.open;
+  if (t.classList.contains('wc') && t.dataset.id) { if (t.open) S.careerOpen.add(t.dataset.id); else S.careerOpen.delete(t.dataset.id); }
+}, true);
 document.addEventListener('change', e => {
+  const wf = e.target.dataset && e.target.dataset.wf;
+  if (wf) { const id = e.target.dataset.id, d = S.draft.get(id) || {}; d[wf] = e.target.value; S.draft.set(id, d); return; }
   if (e.target.id === 'arch-year') { S.arch.year = e.target.value; loadArchive(); }
 });
 document.addEventListener('keydown', e => {
@@ -677,7 +824,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('card')) openDrawer(e.target.dataset.id, 'preview');
   if (e.key === 'Tab' && (S.drawer || S.sheet)) {         // 焦點只在最上層的疊層內打轉
     const box = S.drawer ? $('#drawer') : $('#sheet');
-    const f = [...box.querySelectorAll('button,a[href],summary,[tabindex="0"]')].filter(x => !x.disabled && x.offsetParent !== null);
+    const f = [...box.querySelectorAll('button,a[href],summary,input,select,textarea,[tabindex="0"]')].filter(x => !x.disabled && x.offsetParent !== null);
     if (!f.length) return; const first = f[0], last = f[f.length - 1];
     if (!box.contains(document.activeElement)) { first.focus(); e.preventDefault(); }
     else if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
