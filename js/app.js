@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v21';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v21';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v22';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v22';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -135,8 +135,8 @@ function renderSummary() {
   const doing = items().filter(i => i.status === 'doing');
   const urgent = doing.filter(i => i.deadline && i.deadline > now && i.deadline - now < URGENT_DAYS * D).sort((a, b) => a.deadline - b.deadline);
   $('#sum').innerHTML = S.hadData ? '<b>' + live.length + '</b> 筆待看' + (doing.length ? '・<b>' + doing.length + '</b> 件進行中' : '') +
-    (urgent.length ? '<br><span class="hotn">最急：' + esc(nm(urgent[0])) + '，剩 ' + esc(shortLeft(urgent[0].deadline - now)) + '</span>'
-      : hot ? '<br><span class="hotn">' + hot + ' 筆</span> ' + URGENT_DAYS + ' 天內截止' : '') : '';
+    // 截止提醒只看進行中的案子（Borry 2026-11-16：「截止日要放的是進行中的！」）
+    (urgent.length ? '<br><span class="hotn">最急：' + esc(nm(urgent[0])) + '，剩 ' + esc(shortLeft(urgent[0].deadline - now)) + (urgent.length > 1 ? '（共 ' + urgent.length + ' 件 ' + URGENT_DAYS + ' 天內截止）' : '') + '</span>' : '') : '';
   ['#holdbtn', '#hpill'].forEach(q => { const b = $(q); if (b) b.classList.toggle('urgent', urgent.length > 0); });
 }
 function renderNotice() {
