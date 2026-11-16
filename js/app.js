@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v20';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v20';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v21';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v21';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -11,6 +11,9 @@ const BASKETS = [
   { k: 'achievement', n: '成就機會', d: '合作、評審、展演' },
 ];
 const BN = Object.fromEntries(BASKETS.map(b => [b.k, b.n]));
+// 封存放在最右邊一欄，往左滑才看得到（Borry 2026-11-16 皮條客：「封存可以放到盯案後續的右邊，我們往左滑才看得到」）
+const ARCH = { k: 'archive', n: '封存', d: '結案與作廢的案子，不會自動消失' };
+const TABS = BASKETS.concat([ARCH]);
 const HOLD_HOUR = 8;      // 暫存後，隔天幾點提醒（由集集傳訊息，不是瀏覽器）
 const IC = {
   trash: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>',
@@ -170,6 +173,7 @@ function renderBoard() {
   const lanes = $('#lanes'), board = $('#board');
   const keep = {}; lanes.querySelectorAll('.lane').forEach(l => { keep[l.dataset.l] = l.querySelector('.lbody').scrollTop; });
   const left = lanes.scrollLeft;
+  const hadQ = document.activeElement && document.activeElement.id === 'arch-q';
   let msg = $('#boardmsg'); if (!msg) { msg = document.createElement('div'); msg.id = 'boardmsg'; msg.className = 'board-msg'; msg.hidden = true; board.appendChild(msg); }
   const all = inbox(), loadingEmpty = !S.hadData && S.net === 'loading';
   const holdN = holdItems().length;
@@ -181,8 +185,8 @@ function renderBoard() {
   msg.hidden = !m; lanes.hidden = !!m;
   if (m) msg.innerHTML = m.ic + '<h2>' + m.t + '</h2><p>' + m.p + '</p>' + m.btn;
 
-  $('#tabs').innerHTML = BASKETS.map(b => '<button class="tab b-' + b.k + '" type="button" role="tab" data-tab="' + b.k + '" aria-selected="' + (S.tab === b.k) + '">' +
-    (loadingEmpty ? '<b class="sk-n sk"></b>' : '<b>' + all.filter(i => i.basket === b.k).length + '</b>') + b.n + '</button>').join('');
+  $('#tabs').innerHTML = TABS.map(b => '<button class="tab b-' + b.k + '" type="button" role="tab" data-tab="' + b.k + '" aria-selected="' + (S.tab === b.k) + '">' +
+    (loadingEmpty ? '<b class="sk-n sk"></b>' : '<b>' + (b.k === 'archive' ? (S.arch.loaded ? S.arch.items.length : '…') : all.filter(i => i.basket === b.k).length) + '</b>') + b.n + '</button>').join('');
   $('#tabs').hidden = !!m;
   if (!m) lanes.innerHTML = BASKETS.map(b => {
     const list = sortList(all.filter(i => i.basket === b.k));
@@ -190,21 +194,22 @@ function renderBoard() {
       : list.length ? list.map(card).join('')
       : '<div class="zero">' + IC.inbox + '<b>這一籃目前是空的</b><span>集集和金金找到新的，會自動出現在這裡。</span></div>';
     return '<section class="lane b-' + b.k + (S.tab === b.k ? ' cur' : '') + '" data-l="' + b.k + '"><div class="lh"><h2><i class="ld"></i>' + b.n + '' + (loadingEmpty ? '' : '<em>' + list.length + '</em>') + '</h2><p>' + b.d + '</p>' + scanLine(b.k) + '</div><div class="lbody">' + body + '</div></section>';
-  }).join('');
+  }).join('') + archLane();
   lanes.querySelectorAll('.lane').forEach(l => { const b = l.querySelector('.lbody'); if (keep[l.dataset.l]) b.scrollTop = keep[l.dataset.l]; });
+  if (hadQ) { const q = $('#arch-q'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
   lanes.scrollLeft = left;
   S.fresh.clear();
   edgeFade();
 }
-function scanLine(k) {   // 每籃的「立即掃描」：經資料庫叫醒集集（webhook 金鑰只在後端）
+function scanLine(k) {   // 立即掃描：重新整理小符號＋一行小字，和「上次掃描」同大小放一列（Borry 2026-11-16：畫面簡潔一點）
   if (!api || S.net === 'auth') return '';
   const s = S.scan[k] || {}, all = S.scan.all || {};
   const o = [s.open, all.open].filter(Boolean).sort((a, b) => b.at - a.at)[0];
   const l = [s.last, all.last].filter(Boolean).sort((a, b) => b.at - a.at)[0];
   const fresh = o && tnow() - o.at < 60e3;     // 叫完 60 秒內不能再按
-  const btn = '<button class="scanb" data-act="scan" data-b="' + k + '" type="button"' + (fresh ? ' disabled' : '') + '>' + (o ? '再叫一次' : '立即掃描新機會') + '</button>';
-  if (o) return '<p class="scanl wait"><span>已叫集集掃描（' + fmtClock(o.at) + '），約 5～15 分鐘</span>' + btn + '</p>';
-  return '<p class="scanl">' + btn + (l ? '<span>上次 ' + fmtClock(l.at) + '，新增 ' + l.added + ' 張</span>' : '') + '</p>';
+  const btn = '<button class="scanb" data-act="scan" data-b="' + k + '" type="button"' + (fresh ? ' disabled' : '') + ' aria-label="立即掃描"><span aria-hidden="true">↻</span>立即掃描</button>';
+  const info = o ? '已叫集集掃描（' + fmtClock(o.at) + '），約 5～15 分鐘' : l ? '上次 ' + fmtClock(l.at) + '，新增 ' + l.added + ' 張' : '';
+  return '<p class="scanl' + (o ? ' wait' : '') + '">' + btn + (info ? '<span>' + info + '</span>' : '') + '</p>';
 }
 async function loadScan() { try { if (!api.scanStatus) return; const n = await api.scanStatus(); if (JSON.stringify(n) !== JSON.stringify(S.scan)) { S.scan = n; renderBoard(); } } catch (e) {} }
 function edgeFade() {
@@ -265,29 +270,27 @@ function arow(it) {
     '<h3 class="sb">' + softBreak(it.title) + '</h3><p class="st">' + (it.org ? esc(it.org) + '<br>' : '') + (d ? '結案：' + d : '') + (it.folderName ? '<br>資料夾：' + esc(it.folderName) : '') + '</p>' +
     filesHTML(it) + '<div class="pa"><button data-act="reopen" data-id="' + id + '" type="button">放回進行中</button><button class="pd" data-act="purge" data-id="' + id + '" type="button">徹底刪除</button></div></article>';
 }
-function renderArchive() {
-  const a = S.arch, sh = $('#sheet');
+function archLane() {      // 封存欄：搜尋、篩年份、每列有 Pool／內審、可放回進行中或徹底刪除
+  const a = S.arch;
   const yrs = '<select id="arch-year" aria-label="年份"><option value="">全部年份</option>' + a.years.map(y => '<option value="' + y + '"' + (String(y) === String(a.year) ? ' selected' : '') + '>' + y + '</option>').join('') + '</select>';
-  let list = a.busy && !a.loaded ? '<p class="sheet-note"><span class="spin"></span>載入中</p>'
+  const list = a.busy && !a.loaded ? '<p class="sheet-note"><span class="spin"></span>載入中</p>'
     : a.err ? '<div class="zero"><b>封存區讀不到</b><span>' + esc(a.err) + '</span><button class="btn btn-ghost" data-act="arch-reload" type="button">再試一次</button></div>'
-    : a.items.length ? '<p class="grp">' + a.items.length + ' 筆</p>' + a.items.map(arow).join('')
-    : '<div class="zero"><b>' + (a.q || a.year ? '找不到符合的案子' : '封存區是空的') + '</b><span>進行中的案子按「結案」後會放在這裡，不會自動消失。</span></div>';
-  const had = document.activeElement && document.activeElement.id === 'arch-q';
-  sh.innerHTML = '<div class="dh"><button class="xb back" data-act="back-hold" type="button" aria-label="回待決區">‹</button><span>封存區</span><button class="xb" data-act="close-hold" type="button" aria-label="關閉">×</button></div>' +
-    '<div class="db"><div class="arch-f"><input id="arch-q" type="search" placeholder="搜案名、機關、資料夾" value="' + esc(a.q) + '" enterkeyhint="search">' + yrs + '</div>' + list +
-    '<p class="sheet-note">徹底刪除只刪面板上的資料，電腦裡的資料夾不會動。</p></div>';
-  if (had) { const q = $('#arch-q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
-  sh.classList.toggle('show', S.sheet);
+    : a.items.length ? a.items.map(arow).join('')
+    : '<div class="zero">' + IC.inbox + '<b>' + (a.q || a.year ? '找不到符合的案子' : '封存是空的') + '</b><span>進行中的案子按「結案」後會放在這裡。</span></div>';
+  return '<section class="lane b-archive' + (S.tab === 'archive' ? ' cur' : '') + '" data-l="archive"><div class="lh"><h2><i class="ld"></i>' + ARCH.n + (a.loaded ? '<em>' + a.items.length + '</em>' : '') + '</h2><p>' + ARCH.d + '</p>' +
+    '<div class="arch-f"><input id="arch-q" type="search" placeholder="搜案名、機關、資料夾" value="' + esc(a.q) + '" enterkeyhint="search">' + yrs + '</div></div>' +
+    '<div class="lbody">' + list + '<p class="sheet-note">徹底刪除只刪面板上的資料，電腦裡的資料夾不會動。</p></div></section>';
 }
+function renderArchive() { renderBoard(); }
 let archT;
 async function loadArchive() {
-  const a = S.arch; a.busy = true; a.err = ''; renderSheet();
+  const a = S.arch; a.busy = true; a.err = '';
   try { const r = await api.archive(a.q, a.year); a.items = r.items; a.years = r.years; a.loaded = true; }
   catch (e) { a.err = reason(e); if (e instanceof AdapterError && e.kind === 'auth') S.net = 'auth'; }
-  finally { a.busy = false; if (S.sheet && a.open) renderSheet(); }
+  finally { a.busy = false; renderBoard(); }
 }
 async function archAct(id, action, opt, okMsg) {
-  try { await api.act(id, action, opt); toast(okMsg); if (action === 'purge') { S.items.delete(id); if (S.drawer && S.drawer.id === id) closeDrawer(true); renderAll(); } if (S.arch.open) await loadArchive(); refresh(); }
+  try { await api.act(id, action, opt); toast(okMsg); if (action === 'purge') { S.items.delete(id); if (S.drawer && S.drawer.id === id) closeDrawer(true); renderAll(); } await loadArchive(); refresh(); }
   catch (e) { toast('沒有成功：' + reason(e), { bad: true }); }
 }
 const folderState = it => it.folderStatus === 'done' ? 'done' : it.folderStatus === 'failed' ? 'failed' : 'wait';
@@ -310,7 +313,6 @@ function gcard(it) {
     (past ? '' : '<div class="pa"><button data-act="restore" data-id="' + id + '" type="button">救回來</button></div>') + '</article>';
 }
 function renderSheet() {
-  if (S.arch.open) return renderArchive();
   const h = holdItems(), d = doingItems(), dv = deliveredItems(), pd = paidItems(), g = goneItems();
   $('#hpill').hidden = $('#holdbtn').hidden = S.net === 'auth';
   $('#holdbtn').innerHTML = '待決區<b>' + h.length + '</b>';
@@ -324,7 +326,6 @@ function renderSheet() {
   if (dv.length) body += '<p class="grp">已交件，' + dv.length + ' 筆</p>' + dv.map(dcard).join('');
   if (pd.length) body += '<p class="grp">已收款，' + pd.length + ' 筆</p>' + pd.map(dcard).join('');
   if (g.length) body += '<details class="gone"' + (S.goneOpen ? ' open' : '') + '><summary>剛收走的，' + g.length + ' 筆，72 小時內可以救回來</summary>' + g.map(gcard).join('') + '</details>';
-  body += '<button class="btn btn-ghost arch-in" data-act="open-archive" type="button">封存區：結案與作廢的案子</button>';
   body += '<p class="sheet-note">提醒由集集傳訊息給你，網頁自己不會跳通知。</p>';
   sh.innerHTML = '<div class="dh"><span>待決區</span><button class="xb" data-act="close-hold" type="button" aria-label="關閉待決區">×</button></div><div class="db">' + body + '</div>';
   sh.querySelector('.db').scrollTop = sc;
@@ -572,7 +573,7 @@ function closeDrawer(silent) {
   if (!silent) restoreFocus();
 }
 function openSheet() { if (!S.sheet) lastFocus = document.activeElement; S.sheet = true; renderSheet(); syncOverlay(); $('#sheet .xb')?.focus({ preventScroll: true }); }
-function closeSheet() { S.sheet = false; S.arch.open = false; $('#sheet').classList.remove('show'); syncOverlay(); restoreFocus(); }
+function closeSheet() { S.sheet = false; $('#sheet').classList.remove('show'); syncOverlay(); restoreFocus(); }
 function restoreFocus() { if (!S.sheet && !S.drawer && lastFocus && document.contains(lastFocus)) { try { lastFocus.focus({ preventScroll: true }); } catch (e) {} } }
 
 // ---------------- toast ----------------
@@ -720,6 +721,7 @@ async function refresh() {
     locks.forEach(id => { if (!next.has(id) && S.items.has(id)) next.set(id, S.items.get(id)); });
     S.items = next; S.net = 'ok'; S.hadData = true; S.lastOk = tnow();
     if (S.firstNet && added.length) { added.forEach(a => S.fresh.add(a.id)); toast('新進 ' + added.length + ' 筆：「' + nm(added[0]) + '」' + (added.length > 1 ? ' 等' : '')); }
+    if (!S.arch.loaded && !S.arch.busy) loadArchive();
     S.firstNet = true; saveSnapshot(); loadScan();
     // 讀全文在別處完成了，而且正開著這張卡的詳細頁：把全文抓進來
     const dr = S.drawer && get(S.drawer.id);
@@ -750,16 +752,16 @@ board.addEventListener('touchend', e => {
   if (swX === null) return;
   const t = e.changedTouches[0], dx = t.clientX - swX, dy = t.clientY - swY; swX = null;
   if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || Date.now() - swT > 800) return;
-  const i = BASKETS.findIndex(b => b.k === S.tab), j = i + (dx < 0 ? 1 : -1);
-  if (i < 0 || j < 0 || j >= BASKETS.length) return;
-  S.tab = BASKETS[j].k; renderBoard();
+  const i = TABS.findIndex(b => b.k === S.tab), j = i + (dx < 0 ? 1 : -1);
+  if (i < 0 || j < 0 || j >= TABS.length) return;
+  S.tab = TABS[j].k; renderBoard(); if (S.tab === 'archive' && !S.arch.loaded) loadArchive();
   const cur = document.querySelector('.lane.cur'); if (cur) { cur.classList.add(dx < 0 ? 'sw-l' : 'sw-r'); cur.addEventListener('animationend', () => cur.classList.remove('sw-l', 'sw-r'), { once: true }); }
 }, { passive: true });
 
 document.addEventListener('click', e => {
   const act = e.target.closest('[data-act]'), a = act && act.dataset.act, id = act && act.dataset.id;
   if (e.target.id === 'scrim') { S.drawer ? closeDrawer() : closeSheet(); return; }
-  const tab = e.target.closest('[data-tab]'); if (tab) { S.tab = tab.dataset.tab; renderBoard(); return; }
+  const tab = e.target.closest('[data-tab]'); if (tab) { S.tab = tab.dataset.tab; renderBoard(); if (S.tab === 'archive') loadArchive(); return; }
   if (e.target.closest('#hpill,#holdbtn')) { openSheet(); return; }
   if (a) {
     switch (a) {
@@ -781,12 +783,11 @@ document.addEventListener('click', e => {
       case 'scan': { const k = act.dataset.b; act.disabled = true;
         api.scanRequest(k).then(r => { toast(r && r.throttled ? '剛叫過了，等一下再按' : '已叫集集掃描「' + BN[k] + '」，約 5～15 分鐘'); loadScan(); setTimeout(renderBoard, 61e3); },
           e => { act.disabled = false; toast('沒有叫成：' + reason(e), { bad: true }); }); break; }
-      case 'open-archive': S.arch.open = true; renderSheet(); loadArchive(); break;
-      case 'back-hold': S.arch.open = false; renderSheet(); break;
+      case 'open-archive': closeSheet(); S.tab = 'archive'; renderBoard(); loadArchive(); break;
       case 'arch-reload': loadArchive(); break;
       case 'close': { const it = get(id), r = act.dataset.r; if (!it || !RES[r]) break;
         if (!window.confirm('把「' + nm(it) + '」標成「' + RES[r] + '」，收進封存區？之後可以在封存區放回進行中。')) break;
-        closeDrawer(true); mutate(id, 'close', '已收進封存區：' + RES[r], null, { result: r }); break; }
+        closeDrawer(true); mutate(id, 'close', '已收進封存區：' + RES[r], null, { result: r }).then(ok => ok && loadArchive()); break; }
       case 'reopen': archAct(id, 'reopen', {}, '已放回進行中'); break;
       case 'purge': { const it = get(id); if (!it) break;
         const v = window.prompt('徹底刪除後面板和封存區都找不回來（電腦裡的資料夾不會動）。\n要刪就輸入完整案名：\n' + it.title);

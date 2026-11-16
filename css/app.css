@@ -427,3 +427,15 @@ html,body{overscroll-behavior-x:none}
 /* v20：有快截止的進行中案子，待決區按鈕變黃 */
 .holdbtn.urgent,.hpill.urgent{background:#fff1b8;border-color:#e0b400;color:#5a4400}
 .holdbtn.urgent b,.hpill.urgent b{background:#e0b400;color:#fff}
+/* v21：立即掃描縮成小字一列；封存欄 */
+.scanl{gap:4px 10px;font-size:12.5px}
+.scanb{min-height:28px;padding:0 4px;border:0;background:none;color:var(--accent);font-weight:700;font-size:12.5px;display:inline-flex;align-items:center;gap:3px}
+.scanb span{font-size:15px;line-height:1}
+.scanl.wait{font-weight:600}
+.lane.b-archive .arch-f{margin-top:6px}
+.lane.b-archive .arow{margin-bottom:10px}
+.tab.b-archive{opacity:.85}
+/* v21：六個分頁（多了封存）一列排完，封存窄一點 */
+.tabs{grid-template-columns:repeat(5,1fr) .72fr;gap:4px}
+.tab{font-size:12.5px}
+.tab.b-archive{font-size:11.5px}
