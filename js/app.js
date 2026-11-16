@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v18';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v18';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v19';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v19';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -228,12 +228,12 @@ function payBtn(it, cls) {
   const p = linkOf(it, 'pay'); if (!p) return '';
   return '<a class="' + cls + '" href="' + esc(p.url) + '" target="_blank" rel="noopener noreferrer">' + esc(p.label || LK.pay) + (p.amount ? '（' + esc(p.amount) + '）' : '') + '</a>';
 }
-function filesHTML(it) {     // Pool／內審：https 就開連結，本機路徑就顯示並可複製
+function filesHTML(it) {     // Pool／內審並排（Borry 2026-11-16：手機上兩個並列，不要變成兩行）；https 開連結，本機路徑可複製
   const ls = it.links.filter(l => l.kind === 'pool' || l.kind === 'review' || l.kind === 'other'); if (!ls.length) return '';
-  return '<section class="files"><h3>檔案</h3>' + ls.map((l, i) => '<div class="fl"><b>' + esc(l.label || LK[l.kind]) + '</b>' +
+  return '<section class="files"><h3>檔案</h3><div class="flrow">' + ls.map(l => '<div class="fl" title="' + esc(l.label || LK[l.kind]) + '"><b>' + esc(LK[l.kind]) + '</b>' +
     (l.url ? '<a class="btn btn-ghost" href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer">開啟</a>'
-           : '<div class="path">' + esc(l.path) + '</div><button class="btn btn-ghost" data-act="copy-link" data-id="' + esc(it.id) + '" data-i="' + it.links.indexOf(l) + '" type="button">複製</button>') +
-    '</div>').join('') + '<p class="dt-meta">本機路徑在手機上打不開，是給電腦用的。</p></section>';
+           : '<button class="btn btn-ghost" data-act="copy-link" data-id="' + esc(it.id) + '" data-i="' + it.links.indexOf(l) + '" type="button">複製位置</button><small class="fp">' + esc(l.path) + '</small>') +
+    '</div>').join('') + '</div>' + (ls.some(l => l.path) ? '<p class="dt-meta">本機路徑在手機上打不開，是給電腦用的。</p>' : '') + '</section>';
 }
 async function loadHistory(id) {
   try { if (!api.history) return; const h = await api.history(id); S.hist.set(id, h); if (S.drawer && S.drawer.id === id) renderDrawer(); } catch (e) {}

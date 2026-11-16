@@ -418,3 +418,9 @@ html,body{overscroll-behavior-x:none}
 .paybox .btn{min-height:40px;font-size:14.5px}
 .closebox .cb .btn{min-height:38px;font-size:13.5px}
 .closebox .cb .purge{min-height:36px;font-size:13px}
+/* v19：Pool／內審在手機上並排 */
+.files .flrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.files .flrow .fl{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--line);border-radius:12px;border-top:1px solid var(--line);min-width:0}
+.files .flrow .fl b{font-size:14px}
+.files .flrow .fl .btn{min-height:36px;font-size:13.5px;padding:0 10px;width:100%}
+.files .flrow .fp{font-size:11.5px;color:var(--mut);line-height:1.4;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all}
