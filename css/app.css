@@ -439,3 +439,9 @@ html,body{overscroll-behavior-x:none}
 .tabs{grid-template-columns:repeat(5,1fr) .72fr;gap:4px}
 .tab{font-size:12.5px}
 .tab.b-archive{font-size:11.5px}
+/* v23：右上角急件那行太長時截斷，不准把左邊標題擠成直排（公司版 2026-11-16 真資料跑版） */
+.top-l{flex:0 0 auto;min-width:0}
+.top h1,.live{white-space:nowrap}
+.top-r{flex:1 1 auto;min-width:0;justify-content:flex-end}
+.sum{min-width:0;overflow:hidden}
+.sum .hotn{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
