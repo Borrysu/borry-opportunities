@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v19';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v19';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v20';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v20';
 
 const $ = s => document.querySelector(s);
 const BASKETS = [
@@ -128,7 +128,13 @@ function renderSummary() {
   const live = items().filter(i => i.status === 'new');
   const now = tnow();
   const hot = items().filter(i => (i.status === 'new' || i.status === 'snoozed') && i.deadline && i.deadline > now && i.deadline - now < URGENT_DAYS * D).length;
-  $('#sum').innerHTML = S.hadData ? '<b>' + live.length + '</b> 筆待看' + (hot ? '<br><span class="hotn">' + hot + ' 筆</span> ' + URGENT_DAYS + ' 天內截止' : '') : '';
+  // 右上角合併：待看、進行中、最急的一件（Borry 2026-11-16 皮條客：黃色提示併到右上角，最緊急的小字提醒，進行中的標籤變黃）
+  const doing = items().filter(i => i.status === 'doing');
+  const urgent = doing.filter(i => i.deadline && i.deadline > now && i.deadline - now < URGENT_DAYS * D).sort((a, b) => a.deadline - b.deadline);
+  $('#sum').innerHTML = S.hadData ? '<b>' + live.length + '</b> 筆待看' + (doing.length ? '・<b>' + doing.length + '</b> 件進行中' : '') +
+    (urgent.length ? '<br><span class="hotn">最急：' + esc(nm(urgent[0])) + '，剩 ' + esc(shortLeft(urgent[0].deadline - now)) + '</span>'
+      : hot ? '<br><span class="hotn">' + hot + ' 筆</span> ' + URGENT_DAYS + ' 天內截止' : '') : '';
+  ['#holdbtn', '#hpill'].forEach(q => { const b = $(q); if (b) b.classList.toggle('urgent', urgent.length > 0); });
 }
 function renderNotice() {
   const el = $('#notice'); let html = '', cls = 'notice';

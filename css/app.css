@@ -424,3 +424,6 @@ html,body{overscroll-behavior-x:none}
 .files .flrow .fl b{font-size:14px}
 .files .flrow .fl .btn{min-height:36px;font-size:13.5px;padding:0 10px;width:100%}
 .files .flrow .fp{font-size:11.5px;color:var(--mut);line-height:1.4;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all}
+/* v20：有快截止的進行中案子，待決區按鈕變黃 */
+.holdbtn.urgent,.hpill.urgent{background:#fff1b8;border-color:#e0b400;color:#5a4400}
+.holdbtn.urgent b,.hpill.urgent b{background:#e0b400;color:#fff}
