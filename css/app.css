@@ -405,3 +405,16 @@ html,body{overscroll-behavior-x:none}
 .wb .back{grid-column:1/-1;color:var(--mut)}
 .dnote{display:flex;flex-direction:column;gap:6px;margin-top:8px}
 .dnote .btn{min-height:42px;font-size:14.5px;align-self:flex-start}
+/* v17：資料夾抽屜按鈕縮小，讓內容看得到（Borry 2026-11-16：按鈕太大，佔用太多位置） */
+.fold{gap:10px}
+.fold-t{font-size:17px}
+.fold p{font-size:14px}
+.fold .path{font-size:13.5px;padding:8px 10px;font-weight:600}
+.fold .acts .btn{min-height:36px;font-size:13.5px;padding:0 12px;flex:0 0 auto}
+.files .fl{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 8px;padding:8px 0}
+.files .fl b{grid-column:1/-1;font-size:14px}
+.files .fl .path{grid-column:1;font-size:13px;padding:6px 8px;font-weight:600}
+.files .fl .btn{grid-column:2;min-height:34px;font-size:13px;padding:0 10px;white-space:nowrap}
+.paybox .btn{min-height:40px;font-size:14.5px}
+.closebox .cb .btn{min-height:38px;font-size:13.5px}
+.closebox .cb .purge{min-height:36px;font-size:13px}
