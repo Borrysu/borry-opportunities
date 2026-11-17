@@ -1,19 +1,22 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v23';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v23';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v24';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v24';
 
 const $ = s => document.querySelector(s);
+// 個人版不收公司標案（Borry 2026-11-17：「公司標案我機會雷達似乎就不用了」），公司案只留在封存與舊資料的標籤
 const BASKETS = [
-  { k: 'company', n: '公司案', d: '標案、品牌案、機關宣傳片' },
-  { k: 'personal', n: '個人案', d: '自由導演、編劇、詞曲名義接的' },
-  { k: 'other', n: '其他', d: 'AI 能代做、非本業、匿名接' },
-  { k: 'funding', n: '創作資金', d: '補助、影展、比賽' },
+  { k: 'personal', n: '個人案', d: '自由導演、編劇、詞曲名義接的案子' },
+  { k: 'funding', n: '創作資金', d: '補助、影展、比賽（含 GPT 週報）' },
   { k: 'achievement', n: '成就機會', d: '合作、評審、展演' },
+  { k: 'other', n: '非本業', d: '非本業賺錢機會、AI 可以自己跑的' },
 ];
-const BN = Object.fromEntries(BASKETS.map(b => [b.k, b.n]));
+const BN = Object.fromEntries(BASKETS.map(b => [b.k, b.n]).concat([['company', '公司案'], ['todo', '待辦']]));
+// 進行中：手上所有專案（案務＋進度＋跟大器說）；待辦：要請 AI 建置的事，按「去執行」大器開子視窗跑（Borry 2026-11-17）
+const DOING = { k: 'doing', n: '進行中', d: '手上所有專案：案務、進度，有事直接跟大器說' };
+const TODO = { k: 'todo', n: '待辦', d: '要請 AI 建置的事，按「去執行」大器就開跑並回報進度' };
 // 封存放在最右邊一欄，往左滑才看得到（Borry 2026-11-16 皮條客：「封存可以放到盯案後續的右邊，我們往左滑才看得到」）
 const ARCH = { k: 'archive', n: '封存', d: '結案與作廢的案子，不會自動消失' };
-const TABS = BASKETS.concat([ARCH]);
+const TABS = BASKETS.concat([DOING, TODO, ARCH]);
 const HOLD_HOUR = 8;      // 暫存後，隔天幾點提醒（由集集傳訊息，不是瀏覽器）
 const IC = {
   trash: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>',
@@ -29,7 +32,7 @@ const S = {
   net: 'loading',      // loading | ok | offline | auth | nokey
   hadData: false,      // 畫面上是不是已經有資料可看（快照或網路）
   slow: false, lastOk: null, rt: false, firstNet: false,
-  tab: 'company', sheet: false, drawer: null,   // drawer = {id, view:'preview'|'full'}
+  tab: 'personal', sheet: false, drawer: null,   // drawer = {id, view:'preview'|'full'}
   detail: new Map(),   // id → {st:'loading'|'fail'|'none', err, t0}
   textOpen: new Set(), fresh: new Set(),
   scan: {},             // 各籃立即掃描的單：{open, last}
@@ -38,6 +41,9 @@ const S = {
   draft: new Map(),     // 案務欄位還沒存的輸入：id → {欄位: 字串}；重繪時照填回去
   goneOpen: false,      // 「剛收走的」有沒有展開
   careerOpen: new Set(), // 哪些卡的「職涯與工時」展開著
+  msgs: new Map(),      // 跟大器說：key（卡片 id，整個面板是 ''）→ {items, busy, err}
+  chatDraft: new Map(), // 還沒送出的話
+  sending: new Set(),
 };
 let api, lastFocus = null, sigLast = '', depth = 0, ignorePop = false;
 const locks = new Set(), mutDone = {};
@@ -48,7 +54,7 @@ const items = () => [...S.items.values()];
 const get = id => S.items.get(id) || S.arch.items.find(i => i.id === id);
 const WORK = new Set(['doing', 'delivered', 'paid']);       // 進行中、已交件、已收款：都開資料夾抽屜
 const isWork = it => !!it && WORK.has(it.status);
-const isOld = it => it.sourceSite === '既有案';             // 集集直接記進來的既有案，沒有建資料夾
+const isOld = it => it.sourceSite === '既有案' || it.basket === 'todo';             // 集集直接記進來的既有案，沒有建資料夾
 const editing = box => { const a = document.activeElement; return !!(a && box && box.contains(a) && a.matches('input,select,textarea')); };
 const money = n => n == null ? '' : 'NT$ ' + Math.round(n).toLocaleString('zh-TW');
 
@@ -128,11 +134,11 @@ function renderLive() {
   el.innerHTML = '<span class="dot ' + dot + '"></span><span>' + txt + '</span>';
 }
 function renderSummary() {
-  const live = items().filter(i => i.status === 'new');
+  const live = inbox();
   const now = tnow();
   const hot = items().filter(i => (i.status === 'new' || i.status === 'snoozed') && i.deadline && i.deadline > now && i.deadline - now < URGENT_DAYS * D).length;
   // 右上角合併：待看、進行中、最急的一件（Borry 2026-11-16 皮條客：黃色提示併到右上角，最緊急的小字提醒，進行中的標籤變黃）
-  const doing = items().filter(i => i.status === 'doing');
+  const doing = items().filter(i => i.status === 'doing' && i.basket !== 'todo');
   const urgent = doing.filter(i => i.deadline && i.deadline > now && i.deadline - now < URGENT_DAYS * D).sort((a, b) => a.deadline - b.deadline);
   $('#sum').innerHTML = S.hadData ? '<b>' + live.length + '</b> 筆待看' + (doing.length ? '・<b>' + doing.length + '</b> 件進行中' : '') +
     // 截止提醒只看進行中的案子（Borry 2026-11-16：「截止日要放的是進行中的！」）
@@ -156,7 +162,7 @@ function renderNotice() {
 
 // ---------------- 畫面：看板 ----------------
 function sortList(l) { return l.sort((a, b) => vanishAt(a) - vanishAt(b) || (b.foundAt || 0) - (a.foundAt || 0)); }
-const inbox = () => items().filter(i => i.status === 'new');
+const inbox = () => items().filter(i => i.status === 'new' && i.basket !== 'todo' && i.basket !== 'company');
 
 function card(it) {
   const lv = lvOf(it);
@@ -173,7 +179,7 @@ function renderBoard() {
   const lanes = $('#lanes'), board = $('#board');
   const keep = {}; lanes.querySelectorAll('.lane').forEach(l => { keep[l.dataset.l] = l.querySelector('.lbody').scrollTop; });
   const left = lanes.scrollLeft;
-  const hadQ = document.activeElement && document.activeElement.id === 'arch-q';
+  const fid = document.activeElement && ['arch-q', 'todo-in', 'work-in'].includes(document.activeElement.id) ? document.activeElement.id : '';
   let msg = $('#boardmsg'); if (!msg) { msg = document.createElement('div'); msg.id = 'boardmsg'; msg.className = 'board-msg'; msg.hidden = true; board.appendChild(msg); }
   const all = inbox(), loadingEmpty = !S.hadData && S.net === 'loading';
   const holdN = holdItems().length;
@@ -181,12 +187,11 @@ function renderBoard() {
   let m = null;
   if (S.net === 'auth') m = { ic: IC.warn, t: '金鑰失效', p: '請重新開 Borry 專屬網址。', btn: '<button class="btn btn-primary" data-act="paste-key" type="button">貼上金鑰</button>' };
   else if (S.net === 'offline' && !S.hadData) m = { ic: IC.warn, t: '載入失敗', p: '連不到伺服器，也沒有上次的內容可以顯示。請確認網路後再試。', btn: '<button class="btn btn-primary" data-act="retry" type="button">再試一次</button>' };
-  else if (S.hadData && !all.length && S.net !== 'loading') m = { ic: IC.inbox, t: '現在沒有新的機會', p: holdN ? '待決區還有 ' + holdN + ' 筆等你決定。集集和金金找到新的，會自動出現在這裡。' : '集集和金金找到新的，會自動出現在這裡，不用重新整理。', btn: holdN ? '<button class="btn btn-ghost" data-act="open-hold" type="button">看待決區</button>' : '' };
   msg.hidden = !m; lanes.hidden = !!m;
   if (m) msg.innerHTML = m.ic + '<h2>' + m.t + '</h2><p>' + m.p + '</p>' + m.btn;
 
   $('#tabs').innerHTML = TABS.map(b => '<button class="tab b-' + b.k + '" type="button" role="tab" data-tab="' + b.k + '" aria-selected="' + (S.tab === b.k) + '">' +
-    (loadingEmpty ? '<b class="sk-n sk"></b>' : '<b>' + (b.k === 'archive' ? (S.arch.loaded ? S.arch.items.length : '…') : all.filter(i => i.basket === b.k).length) + '</b>') + b.n + '</button>').join('');
+    (loadingEmpty ? '<b class="sk-n sk"></b>' : '<b>' + (b.k === 'archive' ? (S.arch.loaded ? S.arch.items.length : '…') : b.k === 'doing' ? workItems().length : b.k === 'todo' ? todoItems().filter(i => i.status === 'new' || i.runStatus === 'queued' || i.runStatus === 'running').length : all.filter(i => i.basket === b.k).length) + '</b>') + b.n + '</button>').join('');
   $('#tabs').hidden = !!m;
   if (!m) lanes.innerHTML = BASKETS.map(b => {
     const list = sortList(all.filter(i => i.basket === b.k));
@@ -194,10 +199,11 @@ function renderBoard() {
       : list.length ? list.map(card).join('')
       : '<div class="zero">' + IC.inbox + '<b>這一籃目前是空的</b><span>集集和金金找到新的，會自動出現在這裡。</span></div>';
     return '<section class="lane b-' + b.k + (S.tab === b.k ? ' cur' : '') + '" data-l="' + b.k + '"><div class="lh"><h2><i class="ld"></i>' + b.n + '' + (loadingEmpty ? '' : '<em>' + list.length + '</em>') + '</h2><p>' + b.d + '</p>' + scanLine(b.k) + '</div><div class="lbody">' + body + '</div></section>';
-  }).join('') + archLane();
+  }).join('') + doingLane() + todoLane() + archLane();
   lanes.querySelectorAll('.lane').forEach(l => { const b = l.querySelector('.lbody'); if (keep[l.dataset.l]) b.scrollTop = keep[l.dataset.l]; });
-  if (hadQ) { const q = $('#arch-q'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
+  if (fid) { const q = $('#' + fid); if (q) { q.focus(); try { q.setSelectionRange(q.value.length, q.value.length); } catch (e) {} } }
   lanes.scrollLeft = left;
+  const st = $('#tabs [aria-selected="true"]'); if (st && st.scrollIntoView) st.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   S.fresh.clear();
   edgeFade();
 }
@@ -260,13 +266,16 @@ function histHTML(it) {     // 誰、什麼時候、做了什麼
 const RES = { won: '得標／核定', lost: '未得標', submitted: '已送件結案', void: '作廢（做一半不要了）' };
 function closeBox(it) {
   if (!isWork(it)) return '';
+  if (it.basket === 'todo') return '<section class="closebox"><h3>收尾</h3><p>做完或不要了，就收進封存區。</p><div class="cb">' +
+    '<button class="btn btn-ghost" data-act="close" data-r="submitted" data-id="' + esc(it.id) + '" type="button">完成</button>' +
+    '<button class="btn btn-ghost del" data-act="close" data-r="void" data-id="' + esc(it.id) + '" type="button">不做了</button></div></section>';
   return '<section class="closebox"><h3>結案</h3><p>做完或不做了，就收進封存區，以後找檔案從封存區找。</p><div class="cb">' +
     Object.keys(RES).map(k => '<button class="btn btn-ghost' + (k === 'void' ? ' del' : '') + '" data-act="close" data-r="' + k + '" data-id="' + esc(it.id) + '" type="button">' + RES[k] + '</button>').join('') +
     '<button class="btn btn-ghost del purge" data-act="purge" data-id="' + esc(it.id) + '" type="button">徹底刪除（不進封存區）</button></div></section>';
 }
 function arow(it) {
   const id = esc(it.id), d = it.closedAt ? fmtDate(it.closedAt) : '';
-  return '<article class="pc arow" data-aid="' + id + '"><div class="dt-tags" style="margin:0">' + chip(it) + '<span class="rbadge r-' + esc(it.closeResult) + '">' + esc(RES[it.closeResult] || '已結案') + '</span></div>' +
+  return '<article class="pc arow" data-aid="' + id + '"><div class="dt-tags" style="margin:0">' + chip(it) + '<span class="rbadge r-' + esc(it.closeResult) + '">' + esc(it.basket === 'todo' ? (it.closeResult === 'void' ? '不做了' : '完成') : RES[it.closeResult] || '已結案') + '</span></div>' +
     '<h3 class="sb">' + softBreak(it.title) + '</h3><p class="st">' + (it.org ? esc(it.org) + '<br>' : '') + (d ? '結案：' + d : '') + (it.folderName ? '<br>資料夾：' + esc(it.folderName) : '') + '</p>' +
     filesHTML(it) + '<div class="pa"><button data-act="reopen" data-id="' + id + '" type="button">放回進行中</button><button class="pd" data-act="purge" data-id="' + id + '" type="button">徹底刪除</button></div></article>';
 }
@@ -280,6 +289,115 @@ function archLane() {      // 封存欄：搜尋、篩年份、每列有 Pool／
   return '<section class="lane b-archive' + (S.tab === 'archive' ? ' cur' : '') + '" data-l="archive"><div class="lh"><h2><i class="ld"></i>' + ARCH.n + (a.loaded ? '<em>' + a.items.length + '</em>' : '') + '</h2><p>' + ARCH.d + '</p>' +
     '<div class="arch-f"><input id="arch-q" type="search" placeholder="搜案名、機關、資料夾" value="' + esc(a.q) + '" enterkeyhint="search">' + yrs + '</div></div>' +
     '<div class="lbody">' + list + '<p class="sheet-note">徹底刪除只刪面板上的資料，電腦裡的資料夾不會動。</p></div></section>';
+}
+
+// ---------------- 進行中、待辦、跟大器說（Borry 2026-11-17：公司版肉咖對話改成跟大器對話） ----------------
+const WORDER = { doing: 0, delivered: 1, paid: 2 };
+const workItems = () => items().filter(i => isWork(i) && i.basket !== 'todo').sort((a, b) => WORDER[a.status] - WORDER[b.status] || (a.deadline || Infinity) - (b.deadline || Infinity) || (b.decidedAt || 0) - (a.decidedAt || 0));
+const todoItems = () => items().filter(i => i.basket === 'todo' && ['new', 'snoozed', 'doing', 'delivered', 'paid'].includes(i.status)).sort((a, b) => (a.status === 'new' ? 1 : 0) - (b.status === 'new' ? 1 : 0) || (b.foundAt || 0) - (a.foundAt || 0));
+const RUN = { queued: '已交給大器，等 Mac 接手', running: '大器執行中', done: '大器做完了，等你看', failed: '大器卡住了，要你看一下' };
+const stepDone = st => st.filter(x => x.status === 'done' || x.status === 'skipped').length;
+function progressHTML(it, mini) {     // 進度步驟：做完幾步、現在哪一步、卡在哪
+  const st = it.progressSteps, run = it.runStatus;
+  if (!st.length && !it.progressNote && !it.progressBlocker && !run) return mini ? '' : '<section class="prog"><h3>進度</h3><p class="dt-meta">還沒有進度。跟大器說要做什麼，或按「去執行」，大器會把步驟寫在這裡。</p></section>';
+  const n = stepDone(st), cur = st.find(x => x.status === 'current' || x.status === 'blocked');
+  const bar = st.length ? '<div class="pbar" role="progressbar" aria-valuemin="0" aria-valuemax="' + st.length + '" aria-valuenow="' + n + '"><i style="width:' + Math.round(n / st.length * 100) + '%"></i></div>' : '';
+  const runTxt = run ? '<span class="run r-' + esc(run) + '">' + (run === 'running' || run === 'queued' ? '<span class="spin"></span>' : '') + esc(RUN[run] || run) + '</span>' : '';
+  if (mini) return '<div class="pmini">' + runTxt + (st.length ? bar + '<small>' + n + '／' + st.length + (cur ? '，' + esc(cur.name) : '') + '</small>' : '') + (it.progressBlocker ? '<small class="blk">卡住：' + esc(it.progressBlocker) + '</small>' : '') + '</div>';
+  const ICS = { done: '✓', current: '▸', blocked: '!', skipped: '–', pending: '' };
+  return '<section class="prog"><h3>進度</h3>' + runTxt + bar +
+    (st.length ? '<ol class="steps">' + st.map(x => '<li class="s-' + esc(x.status) + '"><i aria-hidden="true">' + (ICS[x.status] || '') + '</i><span class="sbp">' + softBreak(x.name) + (x.note ? '<small>' + esc(x.note) + '</small>' : '') + '</span></li>').join('') + '</ol>' : '') +
+    (it.progressNote ? '<p class="pnote sbp">' + softBreak(it.progressNote) + '</p>' : '') +
+    (it.progressBlocker ? '<p class="pblk sbp"><b>卡住：</b>' + softBreak(it.progressBlocker) + '</p>' : '') +
+    (it.runNote ? '<p class="dt-meta">' + esc(it.runNote) + '</p>' : '') +
+    (it.progressUpdatedAt ? '<p class="dt-meta">' + esc(it.progressUpdatedBy || '大器') + ' 更新於 ' + fmtClock(it.progressUpdatedAt) + '</p>' : '') + '</section>';
+}
+function wcard(it) {
+  const id = esc(it.id);
+  const st = it.status === 'delivered' ? '已交件' + (it.expectedPayDate ? '，預計 ' + esc(it.expectedPayDate) + ' 入帳' : '，等收款')
+    : it.status === 'paid' ? '已收款' + (it.receivedAmount != null ? ' ' + money(it.receivedAmount) : '')
+    : it.deadline ? '<span data-cd="' + id + '" data-mode="line" data-lvl="' + lvOf(it) + '">' + cdLine(it) + '</span>' : (it.quoteAmount != null ? '報價 ' + money(it.quoteAmount) : '進行中');
+  return '<article class="pc wk" data-id="' + id + '" data-lvl="' + lvOf(it) + '"><div class="dt-tags" style="margin:0">' + chip(it) + demo(it) + '</div><h3 class="sb">' + softBreak(it.title) + '</h3>' +
+    '<p class="st">' + st + '</p>' + progressHTML(it, true) +
+    '<div class="pa"><button data-act="chat" data-id="' + id + '" type="button">跟大器說</button><button class="pg" data-act="open-folder" data-id="' + id + '" type="button">案務與進度</button></div></article>';
+}
+function doingLane() {
+  const list = workItems(), loadingEmpty = !S.hadData && S.net === 'loading';
+  const form = '<form class="addf" data-form="work"><input id="work-in" type="text" maxlength="200" placeholder="記一個手上的案子（案名）" aria-label="記一個手上的案子" enterkeyhint="done"><button class="btn btn-primary" type="submit">記下來</button></form>';
+  const body = loadingEmpty ? skel() + skel() : list.length ? list.map(wcard).join('')
+    : '<div class="zero">' + IC.inbox + '<b>還沒有進行中的案子</b><span>機會按「要做」、或在上面記一個手上的案子，就會出現在這裡。大器每天也會整理一次。</span></div>';
+  return '<section class="lane b-doing' + (S.tab === 'doing' ? ' cur' : '') + '" data-l="doing"><div class="lh"><h2><i class="ld"></i>' + DOING.n + (loadingEmpty ? '' : '<em>' + list.length + '</em>') + '</h2><p>' + DOING.d + '</p>' + form + '</div><div class="lbody">' + body + '</div></section>';
+}
+function tcard(it) {
+  const id = esc(it.id), run = it.runStatus, busy = run === 'queued' || run === 'running', fin = it.status !== 'new' && it.status !== 'snoozed';
+  return '<article class="pc td" data-id="' + id + '"><h3 class="sb">' + softBreak(it.title) + '</h3>' + (it.why ? '<p class="st sbp">' + softBreak(it.why) + '</p>' : '') +
+    progressHTML(it, true) +
+    '<div class="pa">' + (fin ? '' : '<button class="pd" data-act="del" data-id="' + id + '" type="button">刪掉</button>') +
+    '<button data-act="chat" data-id="' + id + '" type="button">跟大器說</button>' +
+    (busy ? '' : '<button class="pg" data-act="run" data-id="' + id + '" type="button">' + (run === 'done' || run === 'failed' ? '再執行一次' : '去執行') + '</button>') + '</div></article>';
+}
+function todoLane() {
+  const list = todoItems(), loadingEmpty = !S.hadData && S.net === 'loading';
+  const d = S.chatDraft.get('todo:new') || '';
+  const form = '<form class="addf" data-form="todo"><input id="todo-in" type="text" maxlength="300" placeholder="要請 AI 做什麼（例如：建一個報價單產生器）" aria-label="新增待辦" value="' + esc(d) + '" enterkeyhint="done"><button class="btn btn-primary" type="submit">新增</button></form>';
+  const body = loadingEmpty ? skel() : list.length ? list.map(tcard).join('')
+    : '<div class="zero">' + IC.inbox + '<b>沒有待辦</b><span>在上面打一句要 AI 做的事，按「去執行」大器就開一個子視窗跑，進度會寫回這張卡。</span></div>';
+  return '<section class="lane b-todo' + (S.tab === 'todo' ? ' cur' : '') + '" data-l="todo"><div class="lh"><h2><i class="ld"></i>' + TODO.n + (loadingEmpty ? '' : '<em>' + list.length + '</em>') + '</h2><p>' + TODO.d + '</p>' + form + '</div><div class="lbody">' + body + '</div></section>';
+}
+const chatKey = id => id || '';
+function msgsHTML(k) {
+  const m = S.msgs.get(k);
+  if (!m || (!m.items && m.busy)) return '<p class="dt-meta"><span class="spin"></span>載入中</p>';
+  if (m.err && !m.items) return '<p class="dt-meta">讀不到對話：' + esc(m.err) + '</p>';
+  const list = m.items || [];
+  if (!list.length) return '<p class="dt-meta">還沒有對話。' + (k ? '這張卡的事直接說，大器會照這張卡去做、去查。' : '面板上的事、要找什麼機會、要整理什麼，直接說。') + '</p>';
+  const last = list[list.length - 1], waiting = last.kind === 'user' || last.kind === 'run';
+  return list.map(x => '<div class="msg m-' + esc(x.kind) + '"><p class="sbp">' + softBreak(x.body) + '</p><time>' + esc(x.kind === 'daqi' ? '大器' : x.kind === 'run' ? '去執行' : x.kind === 'system' ? '系統' : '你') + '・' + esc(fmtClock(x.at)) + '</time></div>').join('') +
+    (waiting ? '<p class="dt-meta wait"><span class="spin"></span>大器收到後會回在這裡，通常 1～3 分鐘；Mac 睡著時會等醒來再回。</p>' : '');
+}
+function chatHTML(id) {
+  const k = chatKey(id), v = S.chatDraft.get(k) || '';
+  return '<section class="chat" data-k="' + esc(k) + '"><h3>跟大器說</h3><div class="msgs" data-msgs="' + esc(k) + '">' + msgsHTML(k) + '</div>' +
+    '<div class="cin"><textarea rows="2" maxlength="4000" data-chat="' + esc(k) + '" aria-label="跟大器說" placeholder="' + (id ? '這張卡要大器做什麼、查什麼' : '要大器做什麼都可以說') + '">' + esc(v) + '</textarea>' +
+    '<button class="btn btn-primary" data-act="chat-send" data-id="' + esc(k) + '" type="button"' + (S.sending.has(k) ? ' disabled' : '') + '>送出</button></div>' +
+    '<p class="dt-meta">付款、對外發訊、刪檔這類事，大器會先問你，不會自己做。</p></section>';
+}
+function paintMsgs(k) { document.querySelectorAll('[data-msgs="' + CSS.escape(k) + '"]').forEach(b => { const end = b.scrollHeight - b.scrollTop - b.clientHeight < 40; b.innerHTML = msgsHTML(k); if (end) b.scrollTop = b.scrollHeight; }); }
+async function loadMsgs(id) {
+  const k = chatKey(id); if (!api || !api.msgs) return;
+  const m = S.msgs.get(k) || {}; if (m.busy) return; m.busy = true; S.msgs.set(k, m);
+  try { const list = await api.msgs(id || null); const same = m.items && JSON.stringify(m.items) === JSON.stringify(list); m.items = list; m.err = ''; if (!same) paintMsgs(k); }
+  catch (e) { m.err = reason(e); if (!m.items) paintMsgs(k); }
+  finally { m.busy = false; }
+}
+async function sendMsg(k) {
+  const v = (S.chatDraft.get(k) || '').trim(); if (!v || S.sending.has(k)) return;
+  S.sending.add(k); const btn = document.querySelector('[data-act="chat-send"][data-id="' + CSS.escape(k) + '"]'); if (btn) btn.disabled = true;
+  try { await api.say(k || null, v); S.chatDraft.delete(k); document.querySelectorAll('[data-chat="' + CSS.escape(k) + '"]').forEach(t => { t.value = ''; }); toast('已經跟大器說了'); }
+  catch (e) { toast('沒有送出：' + reason(e), { bad: true }); }
+  finally { S.sending.delete(k); if (btn) btn.disabled = false; await loadMsgs(k); const b = document.querySelector('[data-msgs="' + CSS.escape(k) + '"]'); if (b) b.scrollTop = b.scrollHeight; }
+}
+function openChat(id) {      // 有卡片就開卡片抽屜並捲到對話；沒有就開整個面板的對話
+  if (id) { const it = get(id); if (!it) return; openDrawer(id, isWork(it) || it.basket === 'todo' ? 'folder' : 'full'); }
+  else { if (!S.drawer) lastFocus = document.activeElement; S.drawer = { id: '', view: 'chat' }; renderDrawer(); syncOverlay(); }
+  loadMsgs(id);
+  setTimeout(() => { const c = document.querySelector('#drawer .chat'); if (c && id) c.scrollIntoView({ block: 'start' }); const t = document.querySelector('#drawer [data-chat]'); if (t) t.focus({ preventScroll: !!id }); }, 60);
+}
+function actRun(id) {
+  const it = get(id); if (!it) return;
+  mutate(id, 'run', '已交給大器：「' + nm(it) + '」，進度會寫在這張卡').then(ok => { if (ok) loadMsgs(id); });
+}
+async function addForm(kind, input) {
+  const v = input.value.trim(); if (!v) { input.focus(); return; }
+  input.disabled = true;
+  try {
+    const c = kind === 'todo' ? await api.todoAdd(v) : await api.workAdd(v);
+    if (c) S.items.set(c.id, c);
+    input.value = ''; if (kind === 'todo') S.chatDraft.delete('todo:new');
+    toast(kind === 'todo' ? '已新增待辦，要大器開跑就按「去執行」' : '已記下「' + nm(c || { title: v }) + '」，點開可以填案務');
+    saveSnapshot(); renderAll();
+  } catch (e) { toast('沒有加成：' + reason(e), { bad: true }); }
+  finally { input.disabled = false; }
 }
 function renderArchive() { renderBoard(); }
 let archT;
@@ -313,18 +431,16 @@ function gcard(it) {
     (past ? '' : '<div class="pa"><button data-act="restore" data-id="' + id + '" type="button">救回來</button></div>') + '</article>';
 }
 function renderSheet() {
-  const h = holdItems(), d = doingItems(), dv = deliveredItems(), pd = paidItems(), g = goneItems();
+  const h = holdItems(), d = doingItems().filter(i => i.basket !== 'todo'), dv = deliveredItems(), pd = paidItems(), g = goneItems();
   $('#hpill').hidden = $('#holdbtn').hidden = S.net === 'auth';
   $('#holdbtn').innerHTML = '待決區<b>' + h.length + '</b>';
   $('#hpill').innerHTML = '待決區<b>' + h.length + '</b>';
   const sh = $('#sheet'); const sc = sh.querySelector('.db') ? sh.querySelector('.db').scrollTop : 0;
   if (editing(sh)) { sh.classList.toggle('show', S.sheet); return; }   // 正在填「收走原因」：輪詢不重畫，免得字不見
   let body = '';
-  if (!h.length && !d.length && !dv.length && !pd.length) body += '<div class="zero"><b>待決區是空的</b><span>按「暫存」的機會會放在這裡，到時候集集會傳訊息提醒你。</span></div>';
+  if (!h.length) body += '<div class="zero"><b>沒有暫存的機會</b><span>按「暫存」的機會會放在這裡，到時候 iPhone 提醒事項會提醒你。</span></div>';
   if (h.length) body += '<p class="grp">暫存中，' + h.length + ' 筆</p>' + h.map(pcard).join('');
-  if (d.length) body += '<p class="grp">你說要做，' + d.length + ' 筆</p>' + d.map(dcard).join('');
-  if (dv.length) body += '<p class="grp">已交件，' + dv.length + ' 筆</p>' + dv.map(dcard).join('');
-  if (pd.length) body += '<p class="grp">已收款，' + pd.length + ' 筆</p>' + pd.map(dcard).join('');
+  if (d.length + dv.length + pd.length) body += '<p class="sheet-note">要做、已交件、已收款的案子在「進行中」那一欄。<button class="btn btn-ghost" data-act="go-doing" type="button">看進行中</button></p>';
   if (g.length) body += '<details class="gone"' + (S.goneOpen ? ' open' : '') + '><summary>剛收走的，' + g.length + ' 筆，72 小時內可以救回來</summary>' + g.map(gcard).join('') + '</details>';
   body += '<p class="sheet-note">提醒由集集傳訊息給你，網頁自己不會跳通知。</p>';
   sh.innerHTML = '<div class="dh"><span>待決區</span><button class="xb" data-act="close-hold" type="button" aria-label="關閉待決區">×</button></div><div class="db">' + body + '</div>';
@@ -334,8 +450,9 @@ function renderSheet() {
 
 // ---------------- 畫面：詳細資料抽屜 ----------------
 function viewOf() {
+  if (S.drawer && S.drawer.view === 'chat') return 'chat';
   const it = S.drawer && get(S.drawer.id); if (!it) return null;
-  return isWork(it) ? 'folder' : S.drawer.view;
+  return isWork(it) || it.basket === 'todo' ? 'folder' : S.drawer.view;
 }
 function statBlock(it) {
   const t = target(it), lv = lvOf(it);
@@ -394,7 +511,7 @@ function fullHTML(it) {
   return '<div class="dt">' + head(it) + statBlock(it) +
     (it.why ? '<div><p class="dt-why sbp">' + softBreak(it.why) + '</p>' + (it.fit || it.honor ? '<p class="dt-fit">' + (it.fit ? '契合度 <b>' + esc(it.fit) + '</b>' : '') + (it.honor ? '導演地位 <b>' + esc(it.honor) + '</b>' : '') + '</p>' : '') + '</div>' : '') +
     warnBox(it.warn) + bidBox(it) + crawlHTML(it) + firstBox(it) + facts +
-    '<section class="dt-sec dt-src"><h3>來源</h3>' + metaLine(it) + link(it) + '</section>' + histHTML(it) + '</div>';
+    '<section class="dt-sec dt-src"><h3>來源</h3>' + metaLine(it) + link(it) + '</section>' + chatHTML(it.id) + histHTML(it) + '</div>';
 }
 // ---------------- 案務：報價、收款、職涯欄位（doing／delivered／paid 的抽屜） ----------------
 // 欄位名稱照後端 opp_work_update 的 p_patch；career.* 是合併寫入，空白＝移除該鍵。
@@ -504,7 +621,15 @@ async function saveWork(id, step) {
   }
   return mutate(id, step, step === 'deliver' ? '已交件：' + nm(it) : '已收款：' + nm(it), null, has ? { patch } : {});
 }
+function todoHTML(it) {      // 待辦卡的抽屜：說明、進度、跟大器說、去執行
+  const id = esc(it.id), run = it.runStatus, busy = run === 'queued' || run === 'running';
+  return '<div class="dt">' + head(it) + (it.why ? '<p class="dt-why sbp">' + softBreak(it.why) + '</p>' : '') + progressHTML(it) +
+    (busy ? '' : '<div class="acts"><button class="btn btn-primary" data-act="run" data-id="' + id + '" type="button">' + (run === 'done' || run === 'failed' ? '再執行一次' : '去執行') + '</button></div>') +
+    '<p class="dt-meta">按「去執行」後，大器會在 Mac 開一個子視窗用你的個人帳號跑，做到要花錢、對外、刪檔或要你判斷的地方就停下來問你。</p>' +
+    chatHTML(it.id) + histHTML(it) + closeBox(it) + '</div>';
+}
 function folderHTML(it) {
+  if (it.basket === 'todo') return todoHTML(it);
   const fs = folderState(it), name = it.folderName ? '「' + esc(it.folderName) + '」' : '';
   if (fs === 'failed') return '<div class="fold"><p class="fold-t"><span class="ok-ic bad" aria-hidden="true">!</span>資料夾沒建成</p><p>' + esc(it.folderError || '原因不明') + '</p><p>請跟通通說，他會處理。這張卡已經記成「要做」，不會不見。</p></div>';
   if (fs !== 'done') return '<div class="fold"><p class="fold-t"><span class="spin"></span>' + (it.folderStatus === 'building' ? '正在建立工作資料夾' : '已排隊，等 Mac 接工作') + '</p><p>Mac 每分鐘接一次工作，通常 1 到 2 分鐘內建好，附件多會久一點。你可以先回到面板，不用等。</p></div>';
@@ -515,16 +640,24 @@ function folderHTML(it) {
     : '<p class="fold-t"><span class="ok-ic" aria-hidden="true">✓</span>' + (real ? '工作資料夾建好了' : '這張是示意卡') + '</p><p>' + (real ? '「' + esc(it.title) + '」的工作都放在這個資料夾。' : '示意卡按「要做」不會真的建資料夾，其他流程跟真的一樣。') + '</p>' +
       '<div class="path">' + esc(p || it.folderName) + '</div><div class="acts">' +
       (real ? '<button class="btn btn-primary" data-act="copy-path" data-id="' + esc(it.id) + '" type="button">複製位置</button>' : '') + '</div>';
-  return '<div class="fold">' + top + workHTML(it) + payBox + filesHTML(it) + histHTML(it) + closeBox(it) + '</div>';
+  return '<div class="fold">' + top + progressHTML(it) + chatHTML(it.id) + workHTML(it) + payBox + filesHTML(it) + histHTML(it) + closeBox(it) + '</div>';
 }
 function renderDrawer() {
+  if (S.drawer && S.drawer.view === 'chat') {    // 整個面板跟大器說
+    const dr = $('#drawer');
+    if (editing(dr) && dr.dataset.key === 'chat') return;
+    dr.innerHTML = '<div class="dh"><span>跟大器說</span><button class="xb" data-act="close-drawer" type="button" aria-label="關閉">×</button></div><div class="db"><div class="dt">' + chatHTML('') + '</div></div>';
+    dr.dataset.key = 'chat'; dr.classList.add('show');
+    const b = dr.querySelector('.msgs'); if (b) b.scrollTop = b.scrollHeight;
+    return;
+  }
   const dr = $('#drawer'), it = S.drawer && get(S.drawer.id), view = viewOf();
   if (!it || !view) { dr.classList.remove('show'); return; }
   if (editing(dr) && dr.dataset.key === it.id + view) return;   // 正在填案務欄位：輪詢不重畫，免得字不見、游標跳走
   const sc = dr.querySelector('.db') && dr.dataset.key === it.id + view ? dr.querySelector('.db').scrollTop : 0;
   const id = esc(it.id); let label, body, foot = '';
   if (view === 'folder') {
-    label = it.status === 'delivered' ? '已交件' : it.status === 'paid' ? '已收款' : isOld(it) ? '進行中' : folderState(it) === 'done' ? '已建資料夾' : '建立資料夾';
+    label = it.basket === 'todo' ? '待辦' : it.status === 'delivered' ? '已交件' : it.status === 'paid' ? '已收款' : isOld(it) ? '進行中' : folderState(it) === 'done' ? '已建資料夾' : '建立資料夾';
     body = folderHTML(it);
     foot = '<div class="df"><button class="btn btn-primary" data-act="close-drawer" type="button">回到面板</button></div>';
   } else if (view === 'full') {
@@ -544,7 +677,7 @@ function renderDrawer() {
 
 function renderAll() {
   renderLive(); renderNotice(); renderSummary(); renderBoard(); renderSheet();
-  if (S.drawer) { if (!get(S.drawer.id)) closeDrawer(true); else renderDrawer(); }
+  if (S.drawer) { if (S.drawer.view !== 'chat' && !get(S.drawer.id)) closeDrawer(true); else renderDrawer(); }
   syncOverlay();
 }
 
@@ -564,7 +697,7 @@ function openDrawer(id, view) {
   if (!S.drawer) lastFocus = document.activeElement;
   S.drawer = { id, view: view || 'preview' };
   if (view === 'full') ensureDetail(id);
-  if (view === 'full' || view === 'folder') loadHistory(id);
+  if (view === 'full' || view === 'folder') { loadHistory(id); loadMsgs(id); }
   renderDrawer(); syncOverlay();
   const dr = $('#drawer'); if (!dr.contains(document.activeElement)) dr.querySelector('.xb')?.focus({ preventScroll: true });
 }
@@ -596,7 +729,7 @@ const reason = e => {
 };
 const short = t => t.length > 14 ? t.slice(0, 14) + '…' : t;
 const nm = it => short(it.shortTitle || it.title);
-const NEXT = { stash: 'snoozed', unstash: 'new', deleted: 'dropped', skipped: 'dropped', restore: 'new', build: 'doing', close: 'closed', reopen: 'doing', deliver: 'delivered', paid: 'paid' };
+const NEXT = { stash: 'snoozed', unstash: 'new', deleted: 'dropped', skipped: 'dropped', restore: 'new', build: 'doing', close: 'closed', reopen: 'doing', deliver: 'delivered', paid: 'paid', run: 'doing' };
 const mergeCard = (old, res) => ({ ...res, detailText: res.detailText || (old ? old.detailText : ''), attachments: res.attachments.length ? res.attachments : (old ? old.attachments : []) });
 
 async function mutate(id, action, msg, undo, opt = {}) {
@@ -608,6 +741,7 @@ async function mutate(id, action, msg, undo, opt = {}) {
   if (action === 'unstash' || action === 'restore') next.snoozeUntil = null;
   if (action === 'deleted' || action === 'skipped') next.dropReason = action;
   if (action === 'build') next.folderStatus = 'queued';
+  if (action === 'run') { next.runStatus = 'queued'; if (it.basket !== 'todo') next.status = it.status; }
   if (action === 'close') { next.closeResult = opt.result; next.closedAt = tnow(); }
   S.items.set(id, next);
   renderAll();
@@ -690,7 +824,7 @@ async function ensureDetail(id, force) {
 
 // ---------------- 讀取：快照、逾時、輪詢、即時 ----------------
 // 舊版快照沒有新欄位：補預設值，畫面不會因 undefined 出錯
-const SNAP_DEF = { detailText: '', quick: [], facts: [], warn: [], dropNote: '', quoteAmount: null, signed: null, depositAmount: null, depositDate: '', finalAmount: null, finalDue: '', deliveryDate: '', paymentTerms: '', receivedAmount: null, expectedPayDate: '', deliveredAt: null, paidAt: null, earnings: null };
+const SNAP_DEF = { detailText: '', quick: [], facts: [], warn: [], dropNote: '', quoteAmount: null, signed: null, depositAmount: null, depositDate: '', finalAmount: null, finalDue: '', deliveryDate: '', paymentTerms: '', receivedAmount: null, expectedPayDate: '', deliveredAt: null, paidAt: null, earnings: null, progressSteps: [], progressNote: '', progressBlocker: '', progressUpdatedAt: null, progressUpdatedBy: '', runStatus: '', runNote: '' };
 const snapKey = () => CONFIG.SNAPSHOT_KEY + ':' + (api.mode === 'mock' ? 'mock' : keyTag());
 function loadSnapshot() {
   try { const s = JSON.parse(localStorage.getItem(snapKey()) || 'null'); if (s && Array.isArray(s.items) && s.items.length) { s.items.forEach(i => i && i.id && S.items.set(i.id, { ...SNAP_DEF, ...i, career: i.career && typeof i.career === 'object' ? i.career : {}, links: Array.isArray(i.links) ? i.links : [], attachments: Array.isArray(i.attachments) ? i.attachments : [] })); S.lastOk = s.at; S.hadData = true; return true; } } catch (e) {}
@@ -701,7 +835,7 @@ function saveSnapshot() {
 }
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new AdapterError('timeout', '連線逾時')), ms))]);
 const sig = () => JSON.stringify(items().map(i => [i.id, i.status, i.snoozeUntil, i.deadline, i.expiresAt, i.title, i.folderStatus, i.folderPath, i.crawlStatus, i.crawlError, (i.detailText || '').length, i.amountDisplay, i.why,
-  i.dropNote, i.quoteAmount, i.signed, i.depositAmount, i.depositDate, i.finalAmount, i.finalDue, i.deliveryDate, i.paymentTerms, i.receivedAmount, i.expectedPayDate, i.deliveredAt, i.paidAt, i.career, i.earnings, (i.links || []).length]));
+  i.dropNote, i.quoteAmount, i.signed, i.depositAmount, i.depositDate, i.finalAmount, i.finalDue, i.deliveryDate, i.paymentTerms, i.receivedAmount, i.expectedPayDate, i.deliveredAt, i.paidAt, i.career, i.earnings, (i.links || []).length, i.progressSteps, i.progressNote, i.progressBlocker, i.progressUpdatedAt, i.runStatus, i.runNote]));
 
 let inflight = false, again = false, pollT, pingT, unsub = () => {};
 async function refresh() {
@@ -716,12 +850,13 @@ async function refresh() {
       const keepLocal = locks.has(x.id) || (mutDone[x.id] && mutDone[x.id] > t0);
       const old = S.items.get(x.id);
       next.set(x.id, keepLocal && old ? old : mergeCard(old, x));
-      if (!known.has(x.id) && x.status === 'new') added.push(x);
+      if (!known.has(x.id) && x.status === 'new' && x.basket !== 'todo') added.push(x);
     });
     locks.forEach(id => { if (!next.has(id) && S.items.has(id)) next.set(id, S.items.get(id)); });
     S.items = next; S.net = 'ok'; S.hadData = true; S.lastOk = tnow();
     if (S.firstNet && added.length) { added.forEach(a => S.fresh.add(a.id)); toast('新進 ' + added.length + ' 筆：「' + nm(added[0]) + '」' + (added.length > 1 ? ' 等' : '')); }
     if (!S.arch.loaded && !S.arch.busy) loadArchive();
+    if (S.drawer) loadMsgs(S.drawer.view === 'chat' ? '' : S.drawer.id);
     S.firstNet = true; saveSnapshot(); loadScan();
     // 讀全文在別處完成了，而且正開著這張卡的詳細頁：把全文抓進來
     const dr = S.drawer && get(S.drawer.id);
@@ -783,6 +918,11 @@ document.addEventListener('click', e => {
       case 'scan': { const k = act.dataset.b; act.disabled = true;
         api.scanRequest(k).then(r => { toast(r && r.throttled ? '剛叫過了，等一下再按' : '已叫集集掃描「' + BN[k] + '」，約 5～15 分鐘'); loadScan(); setTimeout(renderBoard, 61e3); },
           e => { act.disabled = false; toast('沒有叫成：' + reason(e), { bad: true }); }); break; }
+      case 'chat': openChat(id); break;
+      case 'chat-open': openChat(''); break;
+      case 'chat-send': sendMsg(id || ''); break;
+      case 'run': actRun(id); break;
+      case 'go-doing': closeSheet(); S.tab = 'doing'; renderBoard(); break;
       case 'open-archive': closeSheet(); S.tab = 'archive'; renderBoard(); loadArchive(); break;
       case 'arch-reload': loadArchive(); break;
       case 'close': { const it = get(id), r = act.dataset.r; if (!it || !RES[r]) break;
@@ -808,10 +948,16 @@ document.addEventListener('click', e => {
   const c = e.target.closest('.card:not(.skel), .pc[data-id]');
   if (c && !e.target.closest('summary,a')) {
     const it = get(c.dataset.id); if (!it || c.closest('.gone')) return;
-    openDrawer(c.dataset.id, isWork(it) ? 'folder' : 'preview');
+    openDrawer(c.dataset.id, isWork(it) || it.basket === 'todo' ? 'folder' : 'preview');
   }
 });
+document.addEventListener('submit', e => {
+  const f = e.target.closest('form[data-form]'); if (!f) return;
+  e.preventDefault(); addForm(f.dataset.form, f.querySelector('input'));
+});
 document.addEventListener('input', e => {
+  if (e.target.dataset && e.target.dataset.chat != null) { S.chatDraft.set(e.target.dataset.chat, e.target.value); return; }
+  if (e.target.id === 'todo-in') { S.chatDraft.set('todo:new', e.target.value); return; }
   const wf = e.target.dataset && e.target.dataset.wf;
   if (wf) { const id = e.target.dataset.id, d = S.draft.get(id) || {}; d[wf] = e.target.value; S.draft.set(id, d); e.target.classList.remove('bad'); return; }
   if (e.target.id === 'arch-q') { S.arch.q = e.target.value; clearTimeout(archT); archT = setTimeout(loadArchive, 350); }
@@ -828,6 +974,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (S.drawer) closeDrawer(); else if (S.sheet) closeSheet(); return; }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.target.dataset && e.target.dataset.chat != null) { e.preventDefault(); sendMsg(e.target.dataset.chat); return; }
   if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('card')) openDrawer(e.target.dataset.id, 'preview');
   if (e.key === 'Tab' && (S.drawer || S.sheet)) {         // 焦點只在最上層的疊層內打轉
     const box = S.drawer ? $('#drawer') : $('#sheet');
@@ -861,6 +1008,7 @@ function pasteKey() {
   await refresh();
   schedulePoll();
   setInterval(tick, 30000);
+  setInterval(() => { if (S.drawer && !document.hidden && S.net === 'ok') loadMsgs(S.drawer.view === 'chat' ? '' : S.drawer.id); }, 10000);   // 抽屜開著時每 10 秒看大器回了沒
   setInterval(() => { if (document.querySelector('[data-elapsed]')) tick(); }, 1000);
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

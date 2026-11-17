@@ -1,4 +1,4 @@
-const NICK={'Gig Gig':'集集','Kim Kim':'金金','Tom Tom':'通通','Tongtong':'通通','PixPix':'皮皮','Borry':'你','Mac':'Mac 建資料夾程式','系統':'系統'};
+const NICK={'AI協作':'大器','大器':'大器','Gig Gig':'集集','Kim Kim':'金金','Tom Tom':'通通','Tongtong':'通通','PixPix':'皮皮','Borry':'你','Mac':'Mac 建資料夾程式','系統':'系統'};
 const nick=(n)=>NICK[n]||n;
 // =====================================================================
 // 資料轉接層：整個前端只有這個檔案知道後端長什麼樣（規格見 ../BACKEND.md）。
@@ -30,7 +30,8 @@ export const CONFIG = {
          dive: 'opp_dive', stash: 'opp_stash', unstash: 'opp_unstash', drop: 'opp_drop', restore: 'opp_restore', build: 'opp_build',
          close: 'opp_close', reopen: 'opp_reopen', archive: 'opp_archive', purge: 'opp_purge',
          scanRequest: 'opp_scan_request', scanStatus: 'opp_scan_status',
-         workUpdate: 'opp_work_update', setStatus: 'opp_set_status' },   // 案務：報價收款欄位、doing→delivered→paid（Borry 與集集的金鑰可用）
+         workUpdate: 'opp_work_update', setStatus: 'opp_set_status', workAdd: 'opp_work_add',
+         msgList: 'opp_msg_list', msgAdd: 'opp_msg_add', todoAdd: 'opp_todo_add', run: 'opp_run' },   // 2026-11-17：跟大器說、待辦、去執行   // 案務：報價收款欄位、doing→delivered→paid（Borry 與集集的金鑰可用）
 };
 
 export class AdapterError extends Error {
@@ -66,17 +67,18 @@ export async function createAdapter() {
   const mockFlag = qs.get('mock');
   const forceMock = mockFlag !== null && mockFlag !== '0';
   if (hasKey() && !forceMock && CONFIG.SUPABASE_URL.startsWith('http')) return liveAdapter();
-  const { mockAdapter } = await import('./mock.js?v23');
+  const { mockAdapter } = await import('./mock.js?v24');
   return mockAdapter(forceMock ? mockFlag : '');
 }
 
 // ---------- 正規化：後端欄位 → 前端欄位 ----------
-const BASKET = { company: 'company', personal: 'personal', other: 'other', fund: 'funding', honor: 'achievement', funding: 'funding', achievement: 'achievement' };
+const BASKET = { todo: 'todo', company: 'company', personal: 'personal', other: 'other', fund: 'funding', honor: 'achievement', funding: 'funding', achievement: 'achievement' };
 const ts = v => { if (!v) return null; const n = typeof v === 'number' ? v : Date.parse(v); return Number.isFinite(n) ? n : null; };
 const arr = v => Array.isArray(v) ? v.map(x => String(x)).filter(Boolean) : (typeof v === 'string' && v ? [v] : []);
 const str = v => (v == null ? '' : String(v));
 const web = v => { v = str(v).trim(); return /^https?:\/\//i.test(v) ? v : ''; };   // 連結只收 http(s)，擋 javascript: 等
 
+export const normMsgs = d => (Array.isArray(d) ? d : []).map(m => ({ id: +m.id || 0, kind: ['user', 'daqi', 'system', 'run'].includes(m.kind) ? m.kind : 'user', author: nick(str(m.author)), body: str(m.body), at: ts(m.created_at) })).filter(m => m.body && m.at);
 export const normHistory = h => (Array.isArray(h) ? h : []).map(e => ({ at: ts(e && e.at), actor: nick(str(e && e.actor)), action: str(e && e.action) })).filter(e => e.at && e.action);
 // 掃描請求單：後端籃名 → 前端籃名
 const BACK_BASKET = { company: 'company', personal: 'personal', other: 'other', funding: 'fund', achievement: 'honor' };
@@ -129,6 +131,11 @@ export function normalize(r) {
       kind: ['pool', 'review', 'pay', 'other'].includes(l.kind) ? l.kind : 'other', label: str(l.label), amount: str(l.amount),
       url: /^https:\/\//i.test(str(l.url)) ? str(l.url) : '', path: /^\//.test(str(l.path)) && !/\.\./.test(str(l.path)) ? str(l.path) : '' } : null)
       .filter(l => l && (l.url || (l.path && (l.kind === 'pool' || l.kind === 'review')))),
+    // 進度與去執行（大器寫回）
+    progressSteps: (Array.isArray(r.progress_steps) ? r.progress_steps : []).filter(x => x && typeof x === 'object' && str(x.name)).slice(0, 30)
+      .map(x => ({ name: str(x.name), note: str(x.note), status: ['pending', 'current', 'done', 'skipped', 'blocked'].includes(x.status) ? x.status : 'pending' })),
+    progressNote: str(r.progress_note), progressBlocker: str(r.progress_blocker), progressUpdatedAt: ts(r.progress_updated_at), progressUpdatedBy: nick(str(r.progress_updated_by)),
+    runStatus: ['queued', 'running', 'done', 'failed'].includes(r.run_status) ? r.run_status : '', runNote: str(r.run_note),
   };
 }
 
@@ -168,6 +175,10 @@ function liveAdapter() {
       const d = await rpc(R.get, { p_id: id }); const r = Array.isArray(d) ? d[0] : d;
       return normHistory(r && r.history);
     },
+    async msgs(id) { return normMsgs(await rpc(R.msgList, { p_item_id: id || null, p_limit: 80 })); },
+    async say(id, body) { return rpc(R.msgAdd, { p_item_id: id || null, p_body: body }); },
+    async todoAdd(title, note) { return card(await rpc(R.todoAdd, { p_title: title, p_note: note || null })); },
+    async workAdd(title) { return card(await rpc(R.workAdd, { p_title: title }, 0, W)); },
     async scanRequest(basket) { return rpc(R.scanRequest, { p_basket: BACK_BASKET[basket] || basket }); },   // 立即掃描：留單給集集
     async scanStatus() { return normScan(await rpc(R.scanStatus, {})); },
     async archive(q, year) {   // 封存區：結案與作廢的案子
@@ -188,6 +199,7 @@ function liveAdapter() {
         case 'work': return card(await rpc(R.workUpdate, { p_id: id, p_patch: o.patch || {} }, 0, W));
         case 'deliver': return card(await rpc(R.setStatus, { p_id: id, p_status: 'delivered', ...(o.patch ? { p_patch: o.patch } : {}) }, 0, W));
         case 'paid': return card(await rpc(R.setStatus, { p_id: id, p_status: 'paid', p_patch: o.patch || {} }, 0, W));
+        case 'run': return card(await rpc(R.run, { p_id: id }));
         case 'back': return card(await rpc(R.setStatus, { p_id: id, p_status: o.to === 'delivered' ? 'delivered' : 'doing' }, 0, W));
       }
       throw new AdapterError('server', '未知動作');

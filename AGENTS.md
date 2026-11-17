@@ -33,3 +33,13 @@ Borry 2026-11-17：「你讓 GPT AGY 都有權利去改我機會雷達，然後�
 - 同時有別的 AI 在改：推之前 `git pull`，衝突就停下回報，不要強推（`--force` 禁用）。
 
 改完在 `/Users/borry/Claude projects/handoff/交接帳.md` 檔尾追加一行（誰、改了什麼、commit）。這是個人案：Codex 用 `codex B`、AGY 用 `agy B`、Cursor 用本人帳號、Claude 用 `claude B`。
+
+## v24（2026-11-17）：進行中、待辦、跟大器說
+
+- 籃子：個人版不收公司標案，`basket='company'` 新卡寫入時自動收走（72 小時內可救回）。新籃 `todo`＝Borry 的待辦（要請 AI 建置的事），不會自動過期。
+- 前端欄位順序：個人案、創作資金、成就機會、非本業（`other`，含非本業賺錢與 AI 可代跑）、進行中（doing／delivered／paid，含既有案與案務欄位）、待辦、封存。
+- 跟大器說：`opp_msg_add(p_item_id 或 null, p_body)`、`opp_msg_list(p_item_id, p_limit)`。用 AI協作金鑰寫的會顯示成「大器」並直接算已處理。
+- Mac 收件：`opp_msg_pending`／`opp_msg_handled(p_ids)`，由 launchd `com.borry.opportunity-daqi-relay` 轉給側欄視窗「【機會雷達】大器櫃台」，說明在 `/Users/borry/Claude-Projects/Tools/opportunity-daqi/櫃台說明.md`。
+- 待辦：`opp_todo_add(p_title, p_note)`；去執行：`opp_run(p_id)`（待辦卡變 doing、run_status=queued，並留一則 kind=run 訊息）。
+- 進度：`opp_progress_set(p_id, p_steps, p_note, p_blocker, p_run_status, p_run_session, p_run_note)`，steps 是 `[{name,status(pending/current/done/skipped/blocked),note}]`，最多 30 步。
+- 既有案：`opp_work_add` 現在 Gig Gig、Borry、AI協作都能用；大器每天整理手上專案時用它建卡。

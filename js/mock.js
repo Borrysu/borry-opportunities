@@ -17,7 +17,7 @@
 //   longname     第一張卡改成很長的案名（驗右上角不跑版）
 //   xss          第一張卡的文字欄都塞惡意 HTML、連結改成 javascript:（驗跳脫用，window.__xss 應一直是 undefined）
 //   以上資料一律轉成後端（opp_list）的欄位格式再交給 normalize，所以示範與真後端走同一條路。
-import { AdapterError, normalize, normScan, normHistory } from './adapter.js?v23';
+import { AdapterError, normalize, normScan, normHistory, normMsgs } from './adapter.js?v24';
 
 const H = 3600e3, D = 24 * H;
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -115,12 +115,16 @@ function workRows() {
   const base = (o) => Object.assign(toBackend({ basket: 'personal', title: '', org: '示意資料', found_at: new Date(Date.now() - 10 * D).toISOString(), expires_at: null, found_by: 'Gig Gig', is_demo: true, why: '', quick: [], facts: [], warn: [] }),
     { source_site: '既有案', folder_status: 'done', folder_path: '（既有案，沒有建資料夾）', decided_at: new Date(Date.now() - 10 * D).toISOString() }, o);
   return [
-    base({ id: 'work-doing', status: 'doing', title: '某品牌形象短片導演（示意）', quote_amount: 120000, signed: true, deposit_amount: 36000, deposit_date: dayOff(-6), final_amount: 84000, final_due: dayOff(30), payment_terms: '簽約付三成，交片後 30 天付尾款',
+    base({ id: 'work-doing', status: 'doing', title: '某品牌形象短片導演（示意）', run_status: 'running', progress_note: '分鏡第二版寫好，等客戶回。', progress_updated_by: 'AI協作', progress_updated_at: new Date(Date.now() - 2 * H).toISOString(),
+      progress_steps: [{ name: '讀客戶 brief', status: 'done' }, { name: '分鏡第一版', status: 'done' }, { name: '分鏡第二版', status: 'current', note: '等客戶回覆' }, { name: '拍攝', status: 'pending' }, { name: '剪接交片', status: 'pending' }], quote_amount: 120000, signed: true, deposit_amount: 36000, deposit_date: dayOff(-6), final_amount: 84000, final_due: dayOff(30), payment_terms: '簽約付三成，交片後 30 天付尾款',
       career: { line: '個人導演', public_identity: '導演 Borry', status_gain: '中', status_gain_note: '品牌會在片尾掛導演名', est_hours: 60, tax_withheld: true, referrer: '朋友介紹', kim_judgment: '錢普通，但能放作品集。' } }),
     base({ id: 'work-delivered', status: 'delivered', title: 'AI 影片比賽代製（示意）', basket: 'other', quote_amount: 30000, delivery_date: dayOff(-2), delivered_at: new Date(Date.now() - 2 * D).toISOString(), expected_pay_date: dayOff(12), payment_terms: '交件後兩週匯款',
       career: { line: 'AI 影片與比賽', est_hours: 12, actual_hours: 15, tax_withheld: false } }),
     base({ id: 'work-paid', status: 'paid', title: '工作坊講師鐘點（示意）', basket: 'achievement', quote_amount: 8000, received_amount: 7200, delivery_date: dayOff(-20), delivered_at: new Date(Date.now() - 20 * D).toISOString(), paid_at: new Date(Date.now() - 5 * D).toISOString(),
       career: { line: '教學授權', actual_hours: 4, advance_amount: 300, advance_recovered_date: dayOff(-5) } }),
+    base({ id: 'todo-1', status: 'new', basket: 'todo', title: '建一個報價單產生器（示意）', why: '每次報價都要重打，想要填幾個欄位就出 PDF。', source_site: '待辦', folder_status: 'none', folder_path: null }),
+    base({ id: 'todo-2', status: 'doing', basket: 'todo', title: '把 IG 貼文排程接上 Notion（示意）', source_site: '待辦', folder_status: 'none', folder_path: null, run_status: 'running',
+      progress_steps: [{ name: '查 IG API 能不能排程', status: 'done' }, { name: '寫串接', status: 'current' }, { name: '測一篇', status: 'pending' }], progress_updated_by: 'AI協作', progress_updated_at: new Date(Date.now() - 20 * 60e3).toISOString() }),
     base({ id: 'work-gone', status: 'dropped', drop_reason: 'skipped', title: '婚禮紀錄側拍（示意）', folder_status: 'none', folder_path: null, source_site: 'PRO360', drop_note: '日期跟另一案撞期' }),
   ];
 }
@@ -146,6 +150,9 @@ export function mockAdapter(modeStr) {
     const w = rows.find(r => r.id === 'work-delivered'); if (w) Object.assign(w, { payment_terms: bad, title: bad + '已交件惡意卡', source_site: bad });
   }
   const listeners = new Set();
+  const msgs = [{ id: 1, item_id: 'work-doing', kind: 'user', author: 'Borry', body: '客戶說片長要縮到 60 秒', created_at: new Date(Date.now() - 3 * H).toISOString() },
+    { id: 2, item_id: 'work-doing', kind: 'daqi', author: '大器', body: '收到，分鏡第二版照 60 秒改，第 4、7 顆合併。', created_at: new Date(Date.now() - 2 * H).toISOString() }];
+  if (flags.has('xss')) msgs.push({ id: 3, item_id: null, kind: 'daqi', author: '大器', body: '<img src=x onerror="window.__xss=6">', created_at: new Date().toISOString() });
   const scans = {};   // 示範：立即掃描叫過的紀錄（示範模式不會真的叫集集）
   const ping = () => listeners.forEach(f => f());
   const find = id => { const r = rows.find(x => x.id === id); if (!r) throw new AdapterError('server', '找不到這筆'); return r; };
@@ -169,6 +176,11 @@ export function mockAdapter(modeStr) {
       if (flags.has('auth')) throw new AdapterError('auth', '金鑰不對', 401);
       return { items: rows.filter(r => r.status !== 'closed').map(r => normalize(view(r))), serverTime: Date.now() };
     },
+    async msgs(id) { await wait(120); return normMsgs(msgs.filter(m => (m.item_id || null) === (id || null))); },
+    async say(id, body) { await wait(250); sorry(); const m = { id: msgs.length + 1, item_id: id || null, kind: 'user', author: 'Borry', body, created_at: new Date().toISOString() }; msgs.push(m);
+      setTimeout(() => { msgs.push({ id: msgs.length + 1, item_id: id || null, kind: 'daqi', author: '大器', body: '（示範）收到：「' + body.slice(0, 30) + '」。真的版本會由 Mac 上的大器回覆。', created_at: new Date().toISOString() }); ping(); }, 2500); return m; },
+    async todoAdd(title) { await wait(250); sorry(); const r = Object.assign(workRows()[0], { id: 'todo-n' + (++nextN), basket: 'todo', status: 'new', title, source_site: '待辦', folder_status: 'none', folder_path: null, quote_amount: null, signed: null, deposit_amount: null, final_amount: null, payment_terms: '', career: {}, progress_steps: [], run_status: null, progress_note: '', created_at: new Date().toISOString() }); rows.push(r); return normalize(view(r)); },
+    async workAdd(title) { await wait(250); sorry(); const r = Object.assign(workRows()[0], { id: 'work-n' + (++nextN), title, quote_amount: null, signed: null, deposit_amount: null, final_amount: null, payment_terms: '', career: {}, progress_steps: [], run_status: null, progress_note: '', is_demo: false, decided_at: new Date().toISOString() }); rows.push(r); return normalize(view(r)); },
     async scanRequest(basket) { await wait(300); sorry(); const b = { funding: 'fund', achievement: 'honor' }[basket] || basket; if (scans[b] && Date.now() - Date.parse(scans[b].requested_at) < 60e3) return { ok: true, throttled: true }; scans[b] = { status: 'sent', requested_at: new Date().toISOString() }; setTimeout(ping, 50); return { ok: true }; },
     async scanStatus() { await wait(100); return normScan(Object.fromEntries(['company', 'personal', 'other', 'fund', 'honor'].map(b => [b, { open: scans[b] || null, last: b === 'company' ? { done_at: new Date(Date.now() - 5 * H).toISOString(), added: 2 } : null }]))); },
     async history(id) { await wait(150); const r = find(id); return normHistory([{ at: r.created_at || new Date().toISOString(), actor: r.found_by || 'Gig Gig', action: '找到這個機會' }].concat(['doing', 'delivered', 'paid', 'closed'].includes(r.status) ? [{ at: new Date().toISOString(), actor: 'Borry', action: '要做' }] : []).reverse()); },
@@ -197,6 +209,8 @@ export function mockAdapter(modeStr) {
           break;
         }
         case 'work': applyWork(r, o.patch || {}); break;
+        case 'run': r.run_status = 'queued'; if (r.basket === 'todo') r.status = 'doing'; msgs.push({ id: msgs.length + 1, item_id: r.id, kind: 'run', author: 'Borry', body: '去執行：' + r.title, created_at: new Date().toISOString() });
+          setTimeout(() => { r.run_status = 'running'; r.progress_steps = [{ name: '盤點需求', status: 'current' }, { name: '建置', status: 'pending' }, { name: '驗收', status: 'pending' }]; r.progress_updated_by = 'AI協作'; r.progress_updated_at = new Date().toISOString(); ping(); }, 3000); break;
         case 'deliver': if (!['doing', 'delivered'].includes(r.status)) throw new AdapterError('state', 'cannot go from ' + r.status + ' to delivered', 400);
           if (o.patch) applyWork(r, o.patch); if (r.status === 'doing') { r.status = 'delivered'; r.delivery_date = r.delivery_date || today(); r.delivered_at = r.delivered_at || new Date().toISOString(); } break;
         case 'paid': if (!['delivered', 'paid'].includes(r.status)) throw new AdapterError('state', 'cannot go from ' + r.status + ' to paid', 400);

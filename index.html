@@ -16,7 +16,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg?v=20261116f">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=20261116f">
-<link rel="stylesheet" href="css/app.css?v23">
+<link rel="stylesheet" href="css/app.css?v24">
 <!-- 網路字型只當加分：不擋畫面，載入完用 swap 換上；沒網路時走 css 裡的系統字型。 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -32,11 +32,12 @@
     </div>
     <div class="top-r">
       <p class="sum" id="sum"></p>
+      <button class="daqibtn" id="daqibtn" data-act="chat-open" type="button" aria-haspopup="dialog">跟大器說</button>
       <button class="holdbtn" id="holdbtn" type="button" aria-haspopup="dialog"></button>
     </div>
   </header>
   <div class="notice" id="notice" hidden role="status"></div>
-  <nav class="tabs" id="tabs" role="tablist" aria-label="五個籃子"></nav>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="分類"></nav>
   <main class="board" id="board"><div class="lanes" id="lanes"></div></main>
 </div>
 <button class="hpill" id="hpill" type="button" aria-haspopup="dialog"></button>
@@ -44,6 +45,6 @@
 <aside class="panel sheet" id="sheet" role="dialog" aria-modal="true" aria-label="待決區"></aside>
 <aside class="panel drawer" id="drawer" role="dialog" aria-modal="true" aria-label="機會詳細資料"></aside>
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="js/app.js?v23"></script>
+<script type="module" src="js/app.js?v24"></script>
 </body>
 </html>

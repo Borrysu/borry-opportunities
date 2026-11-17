@@ -445,3 +445,53 @@ html,body{overscroll-behavior-x:none}
 .top-r{flex:1 1 auto;min-width:0;justify-content:flex-end}
 .sum{min-width:0;overflow:hidden}
 .sum .hotn{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* v24（2026-11-17）：拿掉公司案；多了「進行中」「待辦」兩欄、跟大器說、進度步驟 */
+.b-doing{--bf:#b86e00;--bb:#fff1d6}.b-todo{--bf:#1f6f8b;--bb:#dcf0f6}
+.tabs{display:flex;overflow-x:auto;scrollbar-width:none;gap:4px}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:1 0 auto;min-width:62px;padding:0 8px;font-size:12.5px}
+.tab.b-doing,.tab.b-todo{font-weight:800}
+.daqibtn{flex:none;min-height:40px;padding:0 12px;border-radius:12px;border:1.5px solid var(--accent);background:var(--card);color:var(--accent-dk);font-weight:800;font-size:14px;white-space:nowrap}
+.addf{display:flex;gap:6px;margin-top:8px}
+.addf input{flex:1;min-width:0;min-height:44px;padding:0 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);font-size:15px}
+.addf .btn{flex:none;min-height:44px;padding:0 14px}
+.pc.wk,.pc.td{margin-bottom:10px}
+.pmini{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.pmini small{font-size:12.5px;color:var(--mut);line-height:1.4}
+.pmini .blk{color:var(--delc);font-weight:700}
+.pbar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--bf,var(--accent));border-radius:99px}
+.run{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:800;color:var(--accent-dk)}
+.run.r-done{color:#1f7a4d}.run.r-failed{color:var(--delc)}
+.run .spin{width:13px;height:13px}
+.prog{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+.prog h3,.chat h3{font-size:15px;font-weight:800;margin:0}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.steps li{display:flex;gap:8px;align-items:flex-start;font-size:14.5px;line-height:1.5}
+.steps li i{flex:none;width:22px;height:22px;border-radius:99px;display:grid;place-items:center;font-style:normal;font-size:12px;font-weight:900;border:1.5px solid var(--line);color:var(--mut)}
+.steps li small{display:block;color:var(--mut);font-size:12.5px}
+.steps .s-done i{background:#1f7a4d;border-color:#1f7a4d;color:#fff}
+.steps .s-current i{background:var(--accent);border-color:var(--accent);color:#fff}.steps .s-current span{font-weight:800}
+.steps .s-blocked i{background:var(--delc);border-color:var(--delc);color:#fff}
+.steps .s-skipped{opacity:.55}
+.pnote{font-size:14.5px;line-height:1.6;margin:0}
+.pblk{font-size:14px;line-height:1.6;margin:0;padding:8px 10px;border-radius:10px;background:var(--danger-bg);color:var(--warn-ink)}
+.chat{display:flex;flex-direction:column;gap:8px;margin:14px 0;padding:12px;border-radius:14px;background:var(--sheet,#f4f7f6)}
+.msgs{display:flex;flex-direction:column;gap:8px;max-height:46vh;overflow-y:auto;overscroll-behavior:contain}
+.msg{max-width:88%;padding:8px 11px;border-radius:14px;background:var(--card);font-size:14.5px;line-height:1.55;box-shadow:0 1px 2px rgba(29,51,49,.06)}
+.msg p{margin:0;white-space:pre-wrap}
+.msg time{display:block;margin-top:3px;font-size:11.5px;color:var(--mut)}
+.msg.m-user{align-self:flex-end;background:#e2f2ec}
+.msg.m-daqi{align-self:flex-start}
+.msg.m-run,.msg.m-system{align-self:center;background:transparent;box-shadow:none;color:var(--mut);font-size:13px;text-align:center}
+.msgs .wait{display:flex;align-items:center;gap:6px}
+.cin{display:flex;gap:6px;align-items:flex-end}
+.cin textarea{flex:1;min-width:0;min-height:48px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);font:inherit;font-size:15px;resize:vertical}
+.cin .btn{flex:none;min-height:48px;padding:0 14px}
+.sheet-note .btn{margin-left:6px;min-height:36px;padding:0 12px}
+@media (min-width:960px){
+  .lanes{grid-template-columns:repeat(7,minmax(250px,1fr))}
+  .daqibtn{min-height:48px;padding:0 16px;font-size:15px}
+}
+@media (max-width:420px){ .daqibtn{padding:0 9px;font-size:13px} .sum{font-size:12px} }
