@@ -1,7 +1,9 @@
-# 給 Claude：怎麼改「機會雷達」面板
+# 機會雷達：共用規則（Claude、Codex、AGY、Cursor 都照這份）
+
+> 2026-11-17 起四家都能改（Borry：「你讓 GPT AGY 都有權利去改我機會雷達…還有 cursor」）。工具與流程看同資料夾 `AGENTS.md`。
 
 這是 Borry 個人的機會雷達（原名機會面板），網址 https://borrysu.github.io/borry-opportunities/ 。
-個人案，用個人帳號的 `claude B` 來改。回覆 Borry 一律台灣繁體中文。
+個人案，用個人帳號改（Claude 用 `claude B`、Codex 用 `codex B`、AGY 用 `agy B`、Cursor 用本人帳號）。回覆 Borry 一律台灣繁體中文。
 
 ## 你可以改的
 - 這個 repo 的所有前端檔：`index.html`、`css/app.css`、`js/*.js`、`manifest.webmanifest`、`icons/`、`sw.js`。
