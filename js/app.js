@@ -1,13 +1,14 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v24';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v24';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v25';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v25';
 
 const $ = s => document.querySelector(s);
 // 個人版不收公司標案（Borry 2026-11-17：「公司標案我機會雷達似乎就不用了」），公司案只留在封存與舊資料的標籤
 const BASKETS = [
   { k: 'personal', n: '個人案', d: '自由導演、編劇、詞曲名義接的案子' },
-  { k: 'funding', n: '創作資金', d: '補助、影展、比賽（含 GPT 週報）' },
-  { k: 'achievement', n: '成就機會', d: '合作、評審、展演' },
+  // 創作資金只放申請得到的錢；影展、比賽（含 AI 比賽）歸「影展比賽」（Borry 2026-11-17：「AI比賽…算影展跟比賽，他不是我能申請到的資金」）
+  { k: 'funding', n: '創作資金', d: '補助、委製、投資：自己申請得到的錢' },
+  { k: 'achievement', n: '影展比賽', d: '影展、比賽（含 AI 比賽）、創投、合作、評審' },
   { k: 'other', n: '非本業', d: '非本業賺錢機會、AI 可以自己跑的' },
 ];
 const BN = Object.fromEntries(BASKETS.map(b => [b.k, b.n]).concat([['company', '公司案'], ['todo', '待辦']]));
