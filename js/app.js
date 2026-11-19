@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v26';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v26';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v27';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v27';
 
 const $ = s => document.querySelector(s);
 // 個人版不收公司標案（Borry 2026-11-17：「公司標案我機會雷達似乎就不用了」），公司案只留在封存與舊資料的標籤
@@ -359,7 +359,7 @@ function todayLane() {
     : '<li class="none">還沒有 AI 回報正在跑的工作。這一塊要等下一步把各個 AI 的開工、收工接進來。</li>';
   const ev = h.events.slice(0, 8).map(e => '<li><b>' + esc(e.actor) + '</b><small>' + esc(agoTxt(e.at)) + '</small><span>' + esc(e.summary) + '</span></li>').join('');
   const ans = h.answered.length ? '<details class="hans"' + (S.hubAnsOpen ? ' open' : '') + '><summary>你回過的 ' + h.answered.length + ' 件（最近七天）</summary>' +
-    h.answered.map(d => '<div class="ha"><p class="sbp">' + softBreak(d.question) + '</p><p class="hmeta">你選：<b>' + esc(d.answerLabel) + '</b>' + (d.answerNote ? '，補充：' + esc(d.answerNote) : '') + '，' + esc(agoTxt(d.answeredAt)) + (d.pickedUp ? '，大器已收到' : '，等大器收') + '</p>' +
+    h.answered.map(d => '<div class="ha"><p class="sbp">' + softBreak(d.question) + '</p><p class="hmeta">你選：<b>' + esc(d.answerLabel) + '</b>' + (d.answerNote ? '，補充：' + esc(d.answerNote) : '') + (d.answerVia ? '。你在 ' + esc(d.answerVia) + ' 說的，大器代記' + (d.answerQuote ? '，原話「' + esc(d.answerQuote) + '」' : '') : '') + '，' + esc(agoTxt(d.answeredAt)) + (d.pickedUp ? '，大器已收到' : '，等大器收') + '</p>' +
       '<button class="btn btn-ghost" data-act="hub-undo" data-id="' + esc(d.id) + '" type="button"' + (S.hubBusy.has(d.id) ? ' disabled' : '') + '>收回，重新決定</button></div>').join('') + '</details>' : '';
   return '<section class="lane b-today' + (S.tab === 'today' ? ' cur' : '') + '" data-l="today"><div class="lh"><h2><i class="ld"></i>' + TODAY.n + (h.loaded ? '<em>' + h.open.length + '</em>' : '') + '</h2><p>' + TODAY.d + '</p>' + beat + '</div>' +
     '<div class="lbody"><h3 class="hh">等你決定</h3>' + dec + ans + '<h3 class="hh">正在跑</h3><ul class="hl">' + jobs + '</ul>' + (ev ? '<h3 class="hh">最近做完</h3><ul class="hl">' + ev + '</ul>' : '') + '</div></section>';

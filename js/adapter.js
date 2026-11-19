@@ -68,7 +68,7 @@ export async function createAdapter() {
   const mockFlag = qs.get('mock');
   const forceMock = mockFlag !== null && mockFlag !== '0';
   if (hasKey() && !forceMock && CONFIG.SUPABASE_URL.startsWith('http')) return liveAdapter();
-  const { mockAdapter } = await import('./mock.js?v26');
+  const { mockAdapter } = await import('./mock.js?v27');
   return mockAdapter(forceMock ? mockFlag : '');
 }
 
@@ -90,7 +90,7 @@ export function normHub(d) {
   const dec = r => ({ id: str(r.id), project: str(r.project), question: str(r.question), detail: str(r.detail), kind: r.kind === 'talk' ? 'talk' : 'choice',
     options: arr(r.options).slice(0, 8).map(o => ({ key: str(o && o.key), label: str(o && o.label), note: str(o && o.note), recommended: !!(o && o.recommended) })).filter(o => o.key && o.label),
     link: /^https:\/\//i.test(str(r.link)) ? str(r.link) : '', askedBy: str(r.asked_by), origin: str(r.origin), createdAt: ts(r.created_at),
-    answerKey: str(r.answer_key), answerLabel: str(r.answer_label), answerNote: str(r.answer_note), answeredAt: ts(r.answered_at), pickedUp: !!r.picked_up_at });
+    answerKey: str(r.answer_key), answerLabel: str(r.answer_label), answerNote: str(r.answer_note), answerVia: str(r.answer_via), answerQuote: str(r.answer_quote), answeredAt: ts(r.answered_at), pickedUp: !!r.picked_up_at });
   return {
     open: arr(d.open).map(dec), answered: arr(d.answered).map(dec),
     jobs: arr(d.jobs).map(r => ({ id: str(r.id), agent: str(r.agent), machine: str(r.machine), project: str(r.project), title: str(r.title), note: str(r.note),
