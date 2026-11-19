@@ -31,7 +31,8 @@ export const CONFIG = {
          close: 'opp_close', reopen: 'opp_reopen', archive: 'opp_archive', purge: 'opp_purge',
          scanRequest: 'opp_scan_request', scanStatus: 'opp_scan_status',
          workUpdate: 'opp_work_update', setStatus: 'opp_set_status', workAdd: 'opp_work_add',
-         msgList: 'opp_msg_list', msgAdd: 'opp_msg_add', todoAdd: 'opp_todo_add', run: 'opp_run' },   // 2026-11-17：跟大器說、待辦、去執行   // 案務：報價收款欄位、doing→delivered→paid（Borry 與集集的金鑰可用）
+         msgList: 'opp_msg_list', msgAdd: 'opp_msg_add', todoAdd: 'opp_todo_add', run: 'opp_run',
+         hubToday: 'hub_today', hubAnswer: 'hub_decision_answer' },   // 2026-11-17：跟大器說、待辦、去執行   // 案務：報價收款欄位、doing→delivered→paid（Borry 與集集的金鑰可用）
 };
 
 export class AdapterError extends Error {
@@ -67,7 +68,7 @@ export async function createAdapter() {
   const mockFlag = qs.get('mock');
   const forceMock = mockFlag !== null && mockFlag !== '0';
   if (hasKey() && !forceMock && CONFIG.SUPABASE_URL.startsWith('http')) return liveAdapter();
-  const { mockAdapter } = await import('./mock.js?v25');
+  const { mockAdapter } = await import('./mock.js?v26');
   return mockAdapter(forceMock ? mockFlag : '');
 }
 
@@ -82,6 +83,22 @@ export const normMsgs = d => (Array.isArray(d) ? d : []).map(m => ({ id: +m.id |
 export const normHistory = h => (Array.isArray(h) ? h : []).map(e => ({ at: ts(e && e.at), actor: nick(str(e && e.actor)), action: str(e && e.action) })).filter(e => e.at && e.action);
 // 掃描請求單：後端籃名 → 前端籃名
 const BACK_BASKET = { company: 'company', personal: 'personal', other: 'other', funding: 'fund', achievement: 'honor' };
+// 通告板「今天」頁（2026-11-19）：等你決定、正在跑、最近做完、各程式有沒有報到。欄位一律轉成字串或數字，畫面端再跳脫。
+export function normHub(d) {
+  d = d && typeof d === 'object' ? d : {};
+  const arr = v => (Array.isArray(v) ? v : []);
+  const dec = r => ({ id: str(r.id), project: str(r.project), question: str(r.question), detail: str(r.detail), kind: r.kind === 'talk' ? 'talk' : 'choice',
+    options: arr(r.options).slice(0, 8).map(o => ({ key: str(o && o.key), label: str(o && o.label), note: str(o && o.note), recommended: !!(o && o.recommended) })).filter(o => o.key && o.label),
+    link: /^https:\/\//i.test(str(r.link)) ? str(r.link) : '', askedBy: str(r.asked_by), origin: str(r.origin), createdAt: ts(r.created_at),
+    answerKey: str(r.answer_key), answerLabel: str(r.answer_label), answerNote: str(r.answer_note), answeredAt: ts(r.answered_at), pickedUp: !!r.picked_up_at });
+  return {
+    open: arr(d.open).map(dec), answered: arr(d.answered).map(dec),
+    jobs: arr(d.jobs).map(r => ({ id: str(r.id), agent: str(r.agent), machine: str(r.machine), project: str(r.project), title: str(r.title), note: str(r.note),
+      status: ['queued', 'running', 'waiting_mac', 'waiting_you', 'done', 'failed'].includes(r.status) ? r.status : 'running', updatedAt: ts(r.updated_at) })),
+    events: arr(d.events).map(r => ({ id: str(r.id), at: ts(r.at), actor: str(r.actor), project: str(r.project), summary: str(r.summary) })),
+    beats: arr(d.beats).map(r => ({ name: str(r.name), machine: str(r.machine), lastAt: ts(r.last_at), late: !!r.late })),
+  };
+}
 export function normScan(d) {
   const out = {}; if (!d || typeof d !== 'object') return out;
   for (const [k, v] of Object.entries(d)) {
@@ -177,6 +194,8 @@ function liveAdapter() {
     },
     async msgs(id) { return normMsgs(await rpc(R.msgList, { p_item_id: id || null, p_limit: 80 })); },
     async say(id, body) { return rpc(R.msgAdd, { p_item_id: id || null, p_body: body }); },
+    async hubToday() { return normHub(await rpc(R.hubToday, {})); },
+    async hubAnswer(id, k, note) { return rpc(R.hubAnswer, { p_id: id, p_answer_key: k, p_note: note || null }, 0, W); },   // 403＝這把金鑰不能替 Borry 回答，不清金鑰
     async todoAdd(title, note) { return card(await rpc(R.todoAdd, { p_title: title, p_note: note || null })); },
     async workAdd(title) { return card(await rpc(R.workAdd, { p_title: title }, 0, W)); },
     async scanRequest(basket) { return rpc(R.scanRequest, { p_basket: BACK_BASKET[basket] || basket }); },   // 立即掃描：留單給集集

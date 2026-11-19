@@ -1,4 +1,4 @@
-# 機會雷達前端
+# 通告板（原機會雷達）前端
 
 靜態網頁，沒有建置步驟。`index.html` 加 `css/app.css` 加 `js/*.js`（ES modules，不擋畫面）。
 

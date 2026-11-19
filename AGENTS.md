@@ -44,3 +44,10 @@ Borry 2026-11-17：「你讓 GPT AGY 都有權利去改我機會雷達，然後�
 - 進度：`opp_progress_set(p_id, p_steps, p_note, p_blocker, p_run_status, p_run_session, p_run_note)`，steps 是 `[{name,status(pending/current/done/skipped/blocked),note}]`，最多 30 步。
 - 既有案：`opp_work_add` 現在 Gig Gig、Borry、AI協作都能用；大器每天整理手上專案時用它建卡。
 - 2026-11-17 Borry 更正：`fund`（創作資金）只放自己申請得到的錢（補助、委製、投資）；影展、比賽（含 AI 比賽、獎金型比賽）一律放 `honor`，前端欄名改「影展比賽」。
+
+## v26（2026-11-19）：改名通告板、加「今天」頁
+
+- 名字改「通告板」，repo 名與網址不變。第一個分頁「今天」，資料來自 `hub_today`。
+- 要問 Borry 事情：`tools/rpc.sh hub_decision_add '{"p_question":"…","p_project":"案名","p_options":[{"key":"a","label":"…","note":"一句理由","recommended":true},{"key":"b","label":"…"}]}'`。付款、刪檔、對外發訊用 `"p_kind":"talk"`。
+- 收答案、回報工作、記紀錄、常駐程式報到的函式與規矩，見 `CLAUDE.md` 第 22 條。
+- 回答會同步追加到 `/Users/borry/Claude projects/handoff/通告板回覆.md`，開工讀交接帳時一起看。

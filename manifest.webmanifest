@@ -1,7 +1,7 @@
 {
-  "name": "機會雷達",
-  "short_name": "機會雷達",
-  "description": "集集與金金找到的機會，集中在這裡看",
+  "name": "通告板",
+  "short_name": "通告板",
+  "description": "今天要你決定的事、手上的案子、機會，集中在這裡看",
   "lang": "zh-Hant",
   "display": "standalone",
   "orientation": "portrait",

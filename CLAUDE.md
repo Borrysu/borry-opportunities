@@ -70,3 +70,13 @@ Borry 在公司電腦「好咖皮條客面板｜監工」視窗提的修正，�
 19. **畫面簡潔**（Borry 2026-11-16：「我自己希望畫面簡潔一點點」「立即掃描按鈕用重新整理的小符號跟一行小字…跟那個上次掃描的大小一樣放一列」）：立即掃描是「↻ 立即掃描」小字，和「上次幾點，新增幾張」同一列同大小。
 20. **進度用語**（Borry 2026-11-16 皮條客：「審過了要人類決定，肉咖只是做到最後自己覺得可以給人類幹的程度」「佔位大家聽不懂要改成人類看得懂的意思」）：AI（集集、金金、Claude）做完的只能寫「AI 自查完成，等你決定」，不能寫「審過了」「通過」；面板、提醒事項與回報裡不用「佔位」這類術語，改寫成「還沒填的地方：○○」這種人看得懂的說法。
 21. **資料改了不用改版**（Borry 2026-11-16 皮條客：「資訊更動不用這樣一直改版吧」）：案子內容、連結、進度、提醒都走資料庫（RPC 或 SQL），面板會自己抓新的；只有畫面或功能要改才動前端、換 ?vN。
+
+22. **通告板與「今天」頁（2026-11-19 上線，v26）**：Borry 2026-11-19「總控台照建議開工：櫃台新開一隻、名字用建議的第一個」。面板改名「通告板」（repo 名、網址、圖示不變），第一個分頁是「今天」：等你決定、正在跑、最近做完、各程式有沒有報到。
+   - 資料庫只加不改：`hub_decisions`（決定）、`hub_jobs`（工作）、`hub_events`（紀錄）、`hub_beats`（報到），全部只走 `hub_` 函式，直接讀表會被擋。退回方法：拿掉今天分頁、刪掉這四張表與 `hub_` 函式，其他都沒動過。
+   - 問 Borry 事情：`hub_decision_add(p_question, p_options, p_project, p_detail, p_kind, p_source_key, p_origin, p_link)`。`p_options` 是 `[{key,label,note,recommended}]`，推薦的放第一個並標 `recommended:true`，最多 8 個；同一個 `p_source_key` 不會重複建。
+   - **付款、刪檔、對外發訊一律用 `p_kind:'talk'`**：面板不給按鈕，只顯示「要到對話回一句」（規則 3、9）。`p_link` 只收 https。
+   - 回答只有 Borry 的金鑰能按（`hub_decision_answer`，其他金鑰回 28000）。他可以選一個選項、寫補充、或按「照我寫的做」（`_other`，一定要有字）；回過的七天內可以收回。
+   - AI 收答案：`hub_today` 的 `answered` 裡 `picked_up_at` 是空的就是還沒人收；照做之後呼叫 `hub_decision_close(p_id, p_picked_up:true)`。問題不需要了就 `hub_decision_close(p_id)` 或 `(p_source_key)`。
+   - 回報在做什麼：`hub_job_set(p_title, p_agent, p_status, p_project, p_machine, p_needs, p_note, p_result_path, p_source_key)`，status：queued、running、waiting_mac、waiting_you、done、failed。做完記一筆：`hub_event_add(p_summary, p_actor, p_project, p_path, p_source_key)`。常駐程式報到：`hub_beat(p_name, p_machine, p_note, p_every_s)`，超過兩倍間隔沒報到，面板會標紅。
+   - Mac 上的同步程式：launchd `com.borry.hub-sync` 每 5 分鐘跑 `~/Claude-Projects/Tools/hub-sync/hub_sync.py`，把 `handoff/巡查待辦.md` 未勾的項目寫成決定、`handoff/交接帳.md` 新行寫成紀錄，並把 Borry 在面板上的回答追加到 `handoff/通告板回覆.md`。這支只讀兩個帳本，不改它們。
+   - 還沒做的：面板上的對話改走雲端（第三步）、各 AI 開工收工自動寫「正在跑」（第四步）。現在「正在跑」是空的屬正常。

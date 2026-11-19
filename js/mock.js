@@ -17,7 +17,7 @@
 //   longname     第一張卡改成很長的案名（驗右上角不跑版）
 //   xss          第一張卡的文字欄都塞惡意 HTML、連結改成 javascript:（驗跳脫用，window.__xss 應一直是 undefined）
 //   以上資料一律轉成後端（opp_list）的欄位格式再交給 normalize，所以示範與真後端走同一條路。
-import { AdapterError, normalize, normScan, normHistory, normMsgs } from './adapter.js?v25';
+import { AdapterError, normalize, normScan, normHistory, normMsgs, normHub } from './adapter.js?v26';
 
 const H = 3600e3, D = 24 * H;
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -153,6 +153,17 @@ export function mockAdapter(modeStr) {
   const msgs = [{ id: 1, item_id: 'work-doing', kind: 'user', author: 'Borry', body: '客戶說片長要縮到 60 秒', created_at: new Date(Date.now() - 3 * H).toISOString() },
     { id: 2, item_id: 'work-doing', kind: 'daqi', author: '大器', body: '收到，分鏡第二版照 60 秒改，第 4、7 顆合併。', created_at: new Date(Date.now() - 2 * H).toISOString() }];
   if (flags.has('xss')) msgs.push({ id: 3, item_id: null, kind: 'daqi', author: '大器', body: '<img src=x onerror="window.__xss=6">', created_at: new Date().toISOString() });
+  // 今天頁的示範資料
+  const badH = '<img src=x onerror="window.__xss=7">';
+  const hub = { open: [
+      { id: 'h1', project: flags.has('xss') ? badH : '木星 TAPIN', question: flags.has('xss') ? badH : '產品段配樂不變速，只有 3 個接點在拍上，能不能接受？', detail: flags.has('xss') ? badH : '扣合那一下不在拍上。\n\n要對拍就得把這段變速到 120 BPM，音色會變。', kind: 'choice', asked_by: flags.has('xss') ? badH : '大器', origin: '巡查待辦', created_at: new Date(Date.now() - 5 * H).toISOString(),
+        options: [{ key: 'ok', label: flags.has('xss') ? badH : '接受，不變速', note: flags.has('xss') ? badH : '聽感自然', recommended: true }, { key: 'speed', label: '改成變速對拍' }] },
+      { id: 'h2', project: '文化部青年藝術補助', question: '線上申請系統要你本人登入送出', detail: '', kind: 'talk', link: flags.has('xss') ? 'javascript:window.__xss=8' : 'https://example.com/', asked_by: '大器', origin: '大器', created_at: new Date(Date.now() - 26 * H).toISOString(), options: [] }],
+    answered: [{ id: 'h0', project: '系統', question: '示範：之前回過的一題', kind: 'choice', asked_by: '大器', origin: '大器', created_at: new Date(Date.now() - 2 * D).toISOString(), options: [{ key: 'ok', label: '照你建議的做' }], status: 'answered', answer_key: 'ok', answer_label: '照你建議的做', answer_note: flags.has('xss') ? badH : '', answered_at: new Date(Date.now() - 20 * H).toISOString(), picked_up_at: new Date(Date.now() - 19 * H).toISOString() }],
+    jobs: [{ id: 'j1', agent: flags.has('xss') ? badH : '大器（Claude）', machine: 'Mac', title: flags.has('xss') ? badH : '木星 TAPIN 試看帶', status: 'waiting_mac', updated_at: new Date(Date.now() - 40 * 60e3).toISOString() }],
+    events: [{ id: 1, at: new Date(Date.now() - 2 * H).toISOString(), actor: flags.has('xss') ? badH : '大器（Claude）', summary: flags.has('xss') ? badH : '總控台亮相交付，等你定名字、櫃台、開工' }],
+    beats: [{ name: flags.has('xss') ? badH : 'Mac 同步', machine: 'MacBook', last_at: new Date(Date.now() - 2 * 60e3).toISOString(), late: false }, { name: '大器 LINE 收訊', machine: 'MacBook', last_at: new Date(Date.now() - 3 * H).toISOString(), late: true }] };
+  if (flags.has('empty')) { hub.open = []; hub.answered = []; hub.jobs = []; hub.events = []; hub.beats = []; }
   const scans = {};   // 示範：立即掃描叫過的紀錄（示範模式不會真的叫集集）
   const ping = () => listeners.forEach(f => f());
   const find = id => { const r = rows.find(x => x.id === id); if (!r) throw new AdapterError('server', '找不到這筆'); return r; };
@@ -176,6 +187,13 @@ export function mockAdapter(modeStr) {
       if (flags.has('auth')) throw new AdapterError('auth', '金鑰不對', 401);
       return { items: rows.filter(r => r.status !== 'closed').map(r => normalize(view(r))), serverTime: Date.now() };
     },
+    async hubToday() { await wait(120); return normHub(JSON.parse(JSON.stringify(hub))); },
+    async hubAnswer(id, k, note) { await wait(300); sorry();
+      const d = hub.open.concat(hub.answered).find(x => x.id === id); if (!d) throw new AdapterError('server', '找不到這筆');
+      hub.open = hub.open.filter(x => x.id !== id); hub.answered = hub.answered.filter(x => x.id !== id);
+      if (k === null) { Object.assign(d, { status: 'open', answer_key: null, answer_label: null, answer_note: null, answered_at: null, picked_up_at: null }); hub.open.unshift(d); }
+      else { const o = (d.options || []).find(x => x.key === k); Object.assign(d, { status: 'answered', answer_key: k, answer_label: o ? o.label : '其他', answer_note: note || '', answered_at: new Date().toISOString(), picked_up_at: null }); hub.answered.unshift(d); }
+      return d; },
     async msgs(id) { await wait(120); return normMsgs(msgs.filter(m => (m.item_id || null) === (id || null))); },
     async say(id, body) { await wait(250); sorry(); const m = { id: msgs.length + 1, item_id: id || null, kind: 'user', author: 'Borry', body, created_at: new Date().toISOString() }; msgs.push(m);
       setTimeout(() => { msgs.push({ id: msgs.length + 1, item_id: id || null, kind: 'daqi', author: '大器', body: '（示範）收到：「' + body.slice(0, 30) + '」。真的版本會由 Mac 上的大器回覆。', created_at: new Date().toISOString() }); ping(); }, 2500); return m; },

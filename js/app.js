@@ -1,6 +1,6 @@
 // 機會雷達主程式：狀態、畫面、事件。只透過 adapter.js 取得與寫入資料。
-import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v25';
-import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v25';
+import { createAdapter, CONFIG, AdapterError, hasKey, keyTag, tokenFrom, saveKey } from './adapter.js?v26';
+import { esc, H, D, URGENT_DAYS, fmtDate, fmtClock, fmtLeft, shortLeft, softBreak, splitAmount } from './util.js?v26';
 
 const $ = s => document.querySelector(s);
 // 個人版不收公司標案（Borry 2026-11-17：「公司標案我機會雷達似乎就不用了」），公司案只留在封存與舊資料的標籤
@@ -17,7 +17,9 @@ const DOING = { k: 'doing', n: '進行中', d: '手上所有專案：案務、�
 const TODO = { k: 'todo', n: '待辦', d: '要請 AI 建置的事，按「去執行」大器就開跑並回報進度' };
 // 封存放在最右邊一欄，往左滑才看得到（Borry 2026-11-16 皮條客：「封存可以放到盯案後續的右邊，我們往左滑才看得到」）
 const ARCH = { k: 'archive', n: '封存', d: '結案與作廢的案子，不會自動消失' };
-const TABS = BASKETS.concat([DOING, TODO, ARCH]);
+// 今天：打開第一眼先看要你決定的事（Borry 2026-11-19：「總控台照建議開工」，名字用通告板）
+const TODAY = { k: 'today', n: '今天', d: '現在要你決定的事，還有誰在做什麼' };
+const TABS = [TODAY].concat(BASKETS, [DOING, TODO, ARCH]);
 const HOLD_HOUR = 8;      // 暫存後，隔天幾點提醒（由集集傳訊息，不是瀏覽器）
 const IC = {
   trash: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>',
@@ -33,7 +35,7 @@ const S = {
   net: 'loading',      // loading | ok | offline | auth | nokey
   hadData: false,      // 畫面上是不是已經有資料可看（快照或網路）
   slow: false, lastOk: null, rt: false, firstNet: false,
-  tab: 'personal', sheet: false, drawer: null,   // drawer = {id, view:'preview'|'full'}
+  tab: 'today', sheet: false, drawer: null,   // drawer = {id, view:'preview'|'full'}
   detail: new Map(),   // id → {st:'loading'|'fail'|'none', err, t0}
   textOpen: new Set(), fresh: new Set(),
   scan: {},             // 各籃立即掃描的單：{open, last}
@@ -45,6 +47,8 @@ const S = {
   msgs: new Map(),      // 跟大器說：key（卡片 id，整個面板是 ''）→ {items, busy, err}
   chatDraft: new Map(), // 還沒送出的話
   sending: new Set(),
+  hub: { open: [], answered: [], jobs: [], events: [], beats: [], loaded: false, err: '' },   // 今天頁
+  hubBusy: new Set(), hubAnsOpen: false,
 };
 let api, lastFocus = null, sigLast = '', depth = 0, ignorePop = false;
 const locks = new Set(), mutDone = {};
@@ -181,6 +185,7 @@ function renderBoard() {
   const keep = {}; lanes.querySelectorAll('.lane').forEach(l => { keep[l.dataset.l] = l.querySelector('.lbody').scrollTop; });
   const left = lanes.scrollLeft;
   const fid = document.activeElement && ['arch-q', 'todo-in', 'work-in'].includes(document.activeElement.id) ? document.activeElement.id : '';
+  const hf = document.activeElement && document.activeElement.dataset && /^hub:/.test(document.activeElement.dataset.chat || '') ? document.activeElement.dataset.chat : '';
   let msg = $('#boardmsg'); if (!msg) { msg = document.createElement('div'); msg.id = 'boardmsg'; msg.className = 'board-msg'; msg.hidden = true; board.appendChild(msg); }
   const all = inbox(), loadingEmpty = !S.hadData && S.net === 'loading';
   const holdN = holdItems().length;
@@ -192,9 +197,9 @@ function renderBoard() {
   if (m) msg.innerHTML = m.ic + '<h2>' + m.t + '</h2><p>' + m.p + '</p>' + m.btn;
 
   $('#tabs').innerHTML = TABS.map(b => '<button class="tab b-' + b.k + '" type="button" role="tab" data-tab="' + b.k + '" aria-selected="' + (S.tab === b.k) + '">' +
-    (loadingEmpty ? '<b class="sk-n sk"></b>' : '<b>' + (b.k === 'archive' ? (S.arch.loaded ? S.arch.items.length : '…') : b.k === 'doing' ? workItems().length : b.k === 'todo' ? todoItems().filter(i => i.status === 'new' || i.runStatus === 'queued' || i.runStatus === 'running').length : all.filter(i => i.basket === b.k).length) + '</b>') + b.n + '</button>').join('');
+    (loadingEmpty ? '<b class="sk-n sk"></b>' : '<b>' + (b.k === 'today' ? (S.hub.loaded ? S.hub.open.length : '…') : b.k === 'archive' ? (S.arch.loaded ? S.arch.items.length : '…') : b.k === 'doing' ? workItems().length : b.k === 'todo' ? todoItems().filter(i => i.status === 'new' || i.runStatus === 'queued' || i.runStatus === 'running').length : all.filter(i => i.basket === b.k).length) + '</b>') + b.n + '</button>').join('');
   $('#tabs').hidden = !!m;
-  if (!m) lanes.innerHTML = BASKETS.map(b => {
+  if (!m) lanes.innerHTML = todayLane() + BASKETS.map(b => {
     const list = sortList(all.filter(i => i.basket === b.k));
     const body = loadingEmpty ? skel() + skel() + skel()
       : list.length ? list.map(card).join('')
@@ -203,6 +208,7 @@ function renderBoard() {
   }).join('') + doingLane() + todoLane() + archLane();
   lanes.querySelectorAll('.lane').forEach(l => { const b = l.querySelector('.lbody'); if (keep[l.dataset.l]) b.scrollTop = keep[l.dataset.l]; });
   if (fid) { const q = $('#' + fid); if (q) { q.focus(); try { q.setSelectionRange(q.value.length, q.value.length); } catch (e) {} } }
+  if (hf) { const q = lanes.querySelector('[data-chat="' + CSS.escape(hf) + '"]'); if (q) { q.focus(); try { q.setSelectionRange(q.value.length, q.value.length); } catch (e) {} } }
   lanes.scrollLeft = left;
   const st = $('#tabs [aria-selected="true"]'); if (st && st.scrollIntoView) st.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   S.fresh.clear();
@@ -322,6 +328,65 @@ function wcard(it) {
     '<p class="st">' + st + '</p>' + progressHTML(it, true) +
     '<div class="pa"><button data-act="chat" data-id="' + id + '" type="button">跟大器說</button><button class="pg" data-act="open-folder" data-id="' + id + '" type="button">案務與進度</button></div></article>';
 }
+// ---------------- 今天頁（通告板） ----------------
+const HJ = { queued: '排隊中', running: '進行中', waiting_mac: '等 Mac 上線', waiting_you: '等你', done: '做完了', failed: '卡住了' };
+function agoTxt(t) {
+  if (!t) return '';
+  const m = Math.max(0, Math.round((tnow() - t) / 60000));
+  return m < 1 ? '剛剛' : m < 60 ? m + ' 分鐘前' : m < 1440 ? Math.round(m / 60) + ' 小時前' : Math.round(m / 1440) + ' 天前';
+}
+function hcard(d) {
+  const id = esc(d.id), busy = S.hubBusy.has(d.id), note = S.chatDraft.get('hub:' + d.id) || '';
+  const body = d.kind === 'talk'
+    ? '<p class="hmeta">這件要你到對話裡回一句。付款、刪檔、對外發訊不在面板上按。' + (d.link ? ' <a href="' + esc(d.link) + '" target="_blank" rel="noopener noreferrer">開對話</a>' : '') + '</p>'
+    : '<div class="hopts">' + d.options.map(o => '<button class="' + (o.recommended ? 'rec' : '') + '" data-act="hub-pick" data-id="' + id + '" data-k="' + esc(o.key) + '" type="button"' + (busy ? ' disabled' : '') + '>' +
+        (o.recommended ? '<small>推薦</small>' : '') + '<span>' + esc(o.label) + '</span>' + (o.note ? '<em>' + esc(o.note) + '</em>' : '') + '</button>').join('') + '</div>' +
+      '<div class="hnote"><textarea data-chat="hub:' + id + '" rows="2" maxlength="2000" placeholder="想補充，或你有別的做法，寫在這裡" aria-label="補充或別的做法">' + esc(note) + '</textarea>' +
+      '<button class="btn btn-ghost" data-act="hub-other" data-id="' + id + '" type="button"' + (busy ? ' disabled' : '') + '>照我寫的做</button></div>';
+  return '<article class="hc">' + (d.project ? '<span class="hproj">' + esc(d.project) + '</span>' : '') + '<h3 class="sb">' + softBreak(d.question) + '</h3>' +
+    (d.detail ? '<details class="hd"><summary>看細節</summary><p class="sbp">' + para(d.detail) + '</p></details>' : '') +
+    '<p class="hmeta">' + esc(d.askedBy || '大器') + ' 問的，' + esc(agoTxt(d.createdAt)) + (d.origin && d.origin !== '大器' ? '，來自' + esc(d.origin) : '') + '</p>' + body + '</article>';
+}
+function todayLane() {
+  const h = S.hub, loadingEmpty = !h.loaded && !h.err;
+  const beat = h.beats.length ? '<p class="hbeat">' + h.beats.map(b => '<span class="' + (b.late ? 'l' : 'k') + '">' + esc(b.name) + (b.late ? '：' + esc(agoTxt(b.lastAt)) + '之後沒再報到' : '：正常') + '</span>').join('') + '</p>' : '';
+  const dec = loadingEmpty ? skel() + skel()
+    : h.err && !h.loaded ? '<div class="zero"><b>今天頁讀不到</b><span>' + esc(h.err) + '</span></div>'
+    : h.open.length ? h.open.map(hcard).join('')
+    : '<div class="zero">' + IC.inbox + '<b>現在沒有要你決定的事</b><span>AI 做到只剩你能決定的時候，會出現在這裡。</span></div>';
+  const act = h.jobs.filter(j => j.status !== 'done' && j.status !== 'failed');
+  const jobs = act.length ? act.map(j => '<li><b>' + esc(j.agent) + '</b>' + (j.machine ? '<small>' + esc(j.machine) + '</small>' : '') + '<span>' + esc(j.title) + '</span><em class="j-' + j.status + '">' + HJ[j.status] + '</em></li>').join('')
+    : '<li class="none">還沒有 AI 回報正在跑的工作。這一塊要等下一步把各個 AI 的開工、收工接進來。</li>';
+  const ev = h.events.slice(0, 8).map(e => '<li><b>' + esc(e.actor) + '</b><small>' + esc(agoTxt(e.at)) + '</small><span>' + esc(e.summary) + '</span></li>').join('');
+  const ans = h.answered.length ? '<details class="hans"' + (S.hubAnsOpen ? ' open' : '') + '><summary>你回過的 ' + h.answered.length + ' 件（最近七天）</summary>' +
+    h.answered.map(d => '<div class="ha"><p class="sbp">' + softBreak(d.question) + '</p><p class="hmeta">你選：<b>' + esc(d.answerLabel) + '</b>' + (d.answerNote ? '，補充：' + esc(d.answerNote) : '') + '，' + esc(agoTxt(d.answeredAt)) + (d.pickedUp ? '，大器已收到' : '，等大器收') + '</p>' +
+      '<button class="btn btn-ghost" data-act="hub-undo" data-id="' + esc(d.id) + '" type="button"' + (S.hubBusy.has(d.id) ? ' disabled' : '') + '>收回，重新決定</button></div>').join('') + '</details>' : '';
+  return '<section class="lane b-today' + (S.tab === 'today' ? ' cur' : '') + '" data-l="today"><div class="lh"><h2><i class="ld"></i>' + TODAY.n + (h.loaded ? '<em>' + h.open.length + '</em>' : '') + '</h2><p>' + TODAY.d + '</p>' + beat + '</div>' +
+    '<div class="lbody"><h3 class="hh">等你決定</h3>' + dec + ans + '<h3 class="hh">正在跑</h3><ul class="hl">' + jobs + '</ul>' + (ev ? '<h3 class="hh">最近做完</h3><ul class="hl">' + ev + '</ul>' : '') + '</div></section>';
+}
+async function loadHub() {
+  if (!api.hubToday) return;
+  try {
+    const h = await api.hubToday(), s0 = JSON.stringify([S.hub.open, S.hub.answered, S.hub.jobs, S.hub.events, S.hub.beats, S.hub.loaded]);
+    S.hub = Object.assign({}, h, { loaded: true, err: '' });
+    if (JSON.stringify([S.hub.open, S.hub.answered, S.hub.jobs, S.hub.events, S.hub.beats, true]) !== s0) renderBoard();
+  } catch (e) { if (!S.hub.loaded) { S.hub.err = e instanceof AdapterError ? (e.kind === 'network' || e.kind === 'offline' ? '連不上伺服器' : '這把金鑰讀不到今天頁') : '發生錯誤'; renderBoard(); } }
+}
+async function hubAnswer(id, k) {
+  if (S.hubBusy.has(id)) return;
+  const d = S.hub.open.concat(S.hub.answered).find(x => x.id === id); if (!d) return;
+  const note = (S.chatDraft.get('hub:' + id) || '').trim();
+  if (k === '_other' && !note) { toast('先在上面寫一句你要怎麼做', { bad: true }); return; }
+  S.hubBusy.add(id); renderBoard();
+  try {
+    await api.hubAnswer(id, k, k === null ? null : (note || null));
+    if (k !== null) S.chatDraft.delete('hub:' + id);
+    toast(k === null ? '已收回，放回等你決定' : '記下了');
+    await loadHub();
+  } catch (e) { toast(e instanceof AdapterError && e.kind === 'forbidden' ? '這把金鑰不能替你回答，請用你自己的網址開' : '沒存上，再按一次', { bad: true }); }
+  finally { S.hubBusy.delete(id); renderBoard(); }
+}
+
 function doingLane() {
   const list = workItems(), loadingEmpty = !S.hadData && S.net === 'loading';
   const form = '<form class="addf" data-form="work"><input id="work-in" type="text" maxlength="200" placeholder="記一個手上的案子（案名）" aria-label="記一個手上的案子" enterkeyhint="done"><button class="btn btn-primary" type="submit">記下來</button></form>';
@@ -858,7 +923,7 @@ async function refresh() {
     if (S.firstNet && added.length) { added.forEach(a => S.fresh.add(a.id)); toast('新進 ' + added.length + ' 筆：「' + nm(added[0]) + '」' + (added.length > 1 ? ' 等' : '')); }
     if (!S.arch.loaded && !S.arch.busy) loadArchive();
     if (S.drawer) loadMsgs(S.drawer.view === 'chat' ? '' : S.drawer.id);
-    S.firstNet = true; saveSnapshot(); loadScan();
+    S.firstNet = true; saveSnapshot(); loadScan(); loadHub();
     // 讀全文在別處完成了，而且正開著這張卡的詳細頁：把全文抓進來
     const dr = S.drawer && get(S.drawer.id);
     if (dr && viewOf() === 'full' && dr.crawlStatus === 'done' && !dr.detailText) ensureDetail(dr.id);
@@ -925,6 +990,9 @@ document.addEventListener('click', e => {
       case 'run': actRun(id); break;
       case 'go-doing': closeSheet(); S.tab = 'doing'; renderBoard(); break;
       case 'open-archive': closeSheet(); S.tab = 'archive'; renderBoard(); loadArchive(); break;
+      case 'hub-pick': hubAnswer(id, act.dataset.k); break;
+      case 'hub-other': hubAnswer(id, '_other'); break;
+      case 'hub-undo': hubAnswer(id, null); break;
       case 'arch-reload': loadArchive(); break;
       case 'close': { const it = get(id), r = act.dataset.r; if (!it || !RES[r]) break;
         if (!window.confirm('把「' + nm(it) + '」標成「' + RES[r] + '」，收進封存區？之後可以在封存區放回進行中。')) break;
@@ -966,6 +1034,7 @@ document.addEventListener('input', e => {
 document.addEventListener('toggle', e => {
   const t = e.target; if (!t.classList) return;
   if (t.classList.contains('gone')) S.goneOpen = t.open;
+  if (t.classList.contains('hans')) S.hubAnsOpen = t.open;
   if (t.classList.contains('wc') && t.dataset.id) { if (t.open) S.careerOpen.add(t.dataset.id); else S.careerOpen.delete(t.dataset.id); }
 }, true);
 document.addEventListener('change', e => {
@@ -975,7 +1044,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (S.drawer) closeDrawer(); else if (S.sheet) closeSheet(); return; }
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.target.dataset && e.target.dataset.chat != null) { e.preventDefault(); sendMsg(e.target.dataset.chat); return; }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.target.dataset && e.target.dataset.chat != null && !/^hub:/.test(e.target.dataset.chat)) { e.preventDefault(); sendMsg(e.target.dataset.chat); return; }
   if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('card')) openDrawer(e.target.dataset.id, 'preview');
   if (e.key === 'Tab' && (S.drawer || S.sheet)) {         // 焦點只在最上層的疊層內打轉
     const box = S.drawer ? $('#drawer') : $('#sheet');
