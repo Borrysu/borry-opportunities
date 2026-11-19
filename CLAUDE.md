@@ -1,3 +1,5 @@
+> **2026-11-20 已搬家，這個倉庫不要再改。** 正本改到 `Borrysu/borrysu.github.io` 的 `current/`（本機 `~/Developer/borrysu.github.io/current`，網址 https://borrysu.github.io/current/ ）。這裡的 index.html、404.html 只是轉址頁，sw.js 只會註銷自己。退回：`git revert` 轉址 commit，或看 tag `before-redirect-20261120`。
+
 # 機會雷達：共用規則（Claude、Codex、AGY、Cursor 都照這份）
 
 > 2026-11-17 起四家都能改（Borry：「你讓 GPT AGY 都有權利去改我機會雷達…還有 cursor」）。工具與流程看同資料夾 `AGENTS.md`。

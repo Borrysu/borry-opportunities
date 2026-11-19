@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><meta name="referrer" content="no-referrer">
+<title>逐流已搬家</title>
+<script>
+// 2026-11-20 正本搬到 https://borrysu.github.io/current/。保留 ?k= 金鑰與 #，/k/金鑰/ 路徑轉成 ?k=金鑰。
+(function(){
+  var OLD='/borry-opportunities/', TO='https://borrysu.github.io/current/';
+  function target(){
+    var p=location.pathname, s=location.search||'', h=location.hash||'';
+    var m=p.match(/\/k\/([^/?#]+)\/?$/);
+    if(m && !/[?&]k=/.test(s)) s=(s?s+'&':'?')+'k='+m[1];
+    return TO+s+h;
+  }
+  var url=target(), done=false;
+  function go(){ if(!done){ done=true; location.replace(url); } }
+  window.__redirectTarget=url;
+  try{
+    if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+      navigator.serviceWorker.getRegistrations().then(function(rs){
+        return Promise.all(rs.filter(function(r){return r.scope.indexOf(location.origin+OLD)===0;}).map(function(r){return r.unregister();}));
+      }).then(go,go);
+      setTimeout(go,800);
+    } else go();
+  }catch(e){ go(); }
+})();
+</script>
+<style>body{margin:0;padding:40px 16px;font:16px/1.5 -apple-system,"PingFang TC",sans-serif;text-align:center}</style>
+</head><body><p>逐流已搬到新網址，正在帶你過去。</p><p><a id="go" href="https://borrysu.github.io/current/">沒有自動跳轉就點這裡</a></p>
+<script>try{document.getElementById('go').href=window.__redirectTarget||'https://borrysu.github.io/current/';}catch(e){}</script>
+</body></html>

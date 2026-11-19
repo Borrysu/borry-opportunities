@@ -1,3 +1,5 @@
+> **2026-11-20 已搬家，這個倉庫不要再改。** 正本改到 `Borrysu/borrysu.github.io` 的 `current/`（本機 `~/Developer/borrysu.github.io/current`，網址 https://borrysu.github.io/current/ ）。這裡的 index.html、404.html 只是轉址頁，sw.js 只會註銷自己。退回：`git revert` 轉址 commit，或看 tag `before-redirect-20261120`。
+
 # 機會雷達：給 Codex（小光）、AGY、Cursor、Claude（大器）的改版入口
 
 Borry 2026-11-17：「你讓 GPT AGY 都有權利去改我機會雷達，然後也要知道用什麼工具並且怎麼改。還有 cursor」。

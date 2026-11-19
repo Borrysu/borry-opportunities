@@ -1,3 +1,5 @@
+> **2026-11-20 已搬家，這個倉庫不要再改。** 正本改到 `Borrysu/borrysu.github.io` 的 `current/`（本機 `~/Developer/borrysu.github.io/current`，網址 https://borrysu.github.io/current/ ）。這裡的 index.html、404.html 只是轉址頁，sw.js 只會註銷自己。退回：`git revert` 轉址 commit，或看 tag `before-redirect-20261120`。
+
 # 通告板（原機會雷達）前端
 
 靜態網頁，沒有建置步驟。`index.html` 加 `css/app.css` 加 `js/*.js`（ES modules，不擋畫面）。

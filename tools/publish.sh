@@ -3,6 +3,7 @@
 # 用法：tools/publish.sh "這次改了什麼"
 # 用 Borry 本人的 HOME 跑 git，AGY 公司帳號改了 HOME 也推得出去。
 set -e
+echo "這個倉庫 2026-11-20 起只剩轉址頁，不要再推。請改 ~/Developer/borrysu.github.io/current 並用那裡的 tools/publish.sh。" >&2; exit 3
 MSG="$1"; [ -n "$MSG" ] || { echo "用法：tools/publish.sh \"說明\"" >&2; exit 2; }
 cd "$(dirname "$0")/.."
 export HOME=/Users/borry
